@@ -1,54 +1,72 @@
 {
-	"documentation": "https://github.com/FalconChristmas/fpp-plugin-Template/blob/master/PLUGININFO_FORMAT.md",
-	"repoName": "fpp-plugin-Template",
-	"name": "Template Plugin for FPP Plugin developers",
-	"author": "John Doe (jdoe)",
-	"description": "This template plugin is designed to make it easier for plugin authors to create new FPP Plugins.  You can manually clone the git repository or install the Template Plugin and then go to the plugin's config page and use the form to copy the template into a new plugin directory.",
-	"homeURL": "https://github.com/FalconChristmas/fpp-plugin-Template",
-	"srcURL": "https://github.com/FalconChristmas/fpp-plugin-Template.git",
-	"bugURL": "https://github.com/FalconChristmas/fpp-plugin-Template/issues",
-	"iconURL": "https://raw.githubusercontent.com/FalconChristmas/fpp-plugin-Template/master/icon.png",
+	"repoName": "fpp-plugin-SkyGuard",
+	"name": "SkyGuard",
+	"author": "mvgoodwin78",
+	"description": "Blacks out moving-head light output when aircraft are within a set radius, using a local ADS-B receiver or online flight data. If you use online data, your show's location and search radius go to the provider you choose (api.adsb.lol or opendata.adsb.fi). A typed address goes to nominatim.openstreetmap.org only when you press Look up.",
+	"homeURL": "https://github.com/mvgoodwin78/fpp-plugin-SkyGuard",
+	"srcURL": "https://github.com/mvgoodwin78/fpp-plugin-SkyGuard.git",
+	"bugURL": "https://github.com/mvgoodwin78/fpp-plugin-SkyGuard/issues",
+	"iconURL": "https://raw.githubusercontent.com/mvgoodwin78/fpp-plugin-SkyGuard/master/icon.png",
+	"private": true,
 	"allowUpdates": 1,
 	"releaseNotesStyle": "gitHistory",
 	"privacy": {
-		"summary": "TEMPLATE TEXT - replace me. Say what this plugin sends, keeps, senses, opens and changes (https://falconchristmas.github.io/fpp-data/plugin_privacy_builder/). If none: Runs on this device only.",
-		"sends": [],
-		"collects": [],
+		"summary": "Blacks out moving heads when aircraft are near. It can send your show's location to an online flight data service, and a typed address to OpenStreetMap when you press Look up.",
+		"sends": [
+			{
+				"to": "api.adsb.lol",
+				"what": "your show's location and search radius",
+				"why": "to find nearby aircraft, when this is the online provider in use",
+				"alwaysOn": false
+			},
+			{
+				"to": "opendata.adsb.fi",
+				"what": "your show's location and search radius",
+				"why": "to find nearby aircraft, when this is the online provider in use",
+				"alwaysOn": false
+			},
+			{
+				"to": "nominatim.openstreetmap.org",
+				"what": "the address you type",
+				"why": "to find its map position, only when you press Look up",
+				"alwaysOn": false
+			},
+			{
+				"to": "http://your ADS-B receiver",
+				"what": "a request for its current aircraft list",
+				"why": "to find nearby aircraft",
+				"alwaysOn": false
+			}
+		],
+		"collects": [
+			{
+				"what": "your show's location",
+				"about": "operator",
+				"keptDays": null,
+				"canDelete": false,
+				"where": "plugindata/fpp-plugin-SkyGuard/private.json"
+			}
+		],
 		"sensors": [],
 		"remoteAccess": "none",
 		"systemChanges": [],
 		"closedCode": false,
-		"other": "TEMPLATE TEXT - replace me (write \"none\" if there is nothing to add)."
+		"other": "Runs a background program while FPP runs, and forces the dimmer and shutter channels you list to their off values during a blackout. Anyone who can reach FPP can read this plugin's status, including your show's location, and can run its Enable, Disable and Test Trigger commands. Uninstalling removes its saved data."
 	},
 	"versions": [
 		{
-			"minFPPVersion": "9.0",
+			"minFPPVersion": "9.5",
 			"maxFPPVersion": "9.99",
 			"branch": "master",
-			"sha": ""
+			"sha": "",
+			"platforms": [ "Raspberry Pi", "BeagleBone Black", "BeagleBone 64" ]
 		},
 		{
 			"minFPPVersion": "10.0",
 			"maxFPPVersion": "0",
 			"branch": "master",
-			"sha": ""
+			"sha": "",
+			"platforms": [ "Raspberry Pi", "BeagleBone Black", "BeagleBone 64" ]
 		}
-	],
-	"dependencies": {
-	    "plugins": [
-			"fpp-plugin-CoolPlugin1",
-			"fpp-plugin-CoolPlugin2"
-		],
-	    "packages": [
-			"system-package-name1",
-			"system-package-name2"
-		],
-		"python": [
-			"python-package-name1"
-		],
-		"scripts": [
-			"Control/script-repository-script1",
-			"PixelOverlay/script-repository-script2"
-		]
-	}
+	]
 }

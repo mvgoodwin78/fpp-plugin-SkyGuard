@@ -8,6 +8,8 @@ SkyGuard blacks out the light output of moving heads whenever any aircraft is in
 
 This document is the build spec for Claude Code. It covers phase 1 backend behavior. The user interface is specified in its own section and built after the backend.
 
+**Revision, Nov 5, 2026:** updated with the verification results and the owner's decisions. See Verification results for what changed and why, and for what still has to be tested on hardware.
+
 **Phase 1 (this build):** data feeds with fallback, trigger engine, per-fixture blackout, schedule awareness, matrix message, FPP warnings, FPP commands, status API, public-listing compliance.
 
 **Later phases:** phase 1b is the UI (see User interface), built once the backend passes its tests; text/push alerts and MQTT come later (see Deferred features).
@@ -24,6 +26,7 @@ The plugin must run on FPP 9.5 and later, on Raspberry Pi 3, 4 and 5 and on Beag
 | Dependencies | Install from `scripts/fpp_install.sh` with `pip install --break-system-packages` or `apt-get` only. Also declare them in `pluginInfo.json` `dependencies` for FPP 10+. Prefer the standard library (`urllib`, `json`, `math`, `threading`) to keep installs light |
 | Logging | Exactly one log: `<logdir>/plugin-fpp-plugin-SkyGuard.log`, logdir from the `LOGDIR` env var (fallback `/home/fpp/media/logs`). Append mode, no self-rotation, no secrets |
 | Settings | `WriteSettingToFile` / FPP plugin config, stored as `config/plugin.fpp-plugin-SkyGuard`. Larger data (fixture list) as JSON under `<mediadir>/plugindata/fpp-plugin-SkyGuard/` |
+| Private data | The API key and home coordinates live in `plugindata/fpp-plugin-SkyGuard/private.json`, mode 0600, never in `config/` (guidelines §14.11) |
 | FPP access | HTTP API on `http://localhost/api/...` only. Never port 32322, never read or edit FPP's config files directly |
 | Restarts | Never restart fppd or reboot. Set `restartFlag` only if truly needed |
 | Filesystem | Write only to the plugin dir, the one log, the plugin config and `plugindata/` |
@@ -42,11 +45,11 @@ INPUTS                      SKYGUARD DAEMON                 OUTPUTS
 
 Receiver Pi        ─┐                                  ┌─> Overlay controller
 (aircraft.json, LAN) ├─> Feed manager                  │   (dimmer + shutter only,
-Online feed        ─┘   (10 s health check,            │    one model per channel)
+Online feed        ─┘   (10 s health check,            │    one channel range each)
 (chosen provider)        fallback, max data age)       ├─> Matrix message
                               │ active aircraft list   │   (LED panels + Virtual Display)
                               v                        ├─> Notifier
-FPP status API     ───> Trigger engine ────────────────┤   (FPP banner + log)
+FPP status API     ───> Trigger engine ────────────────┤   (warnings + log)
 (schedule window)       (radius + altitude band,       └─> Status endpoint
                          IDLE / CLEAR / BLACKOUT)          (api.php, later map view)
 ```
@@ -64,27 +67,35 @@ fpp-plugin-SkyGuard/
   icon.png
   menu.inc                 # max one entry per type (UI phase)
   api.php                  # status + geocode endpoints
-  callbacks                # minimal, enables live command registration
+  callbacks                # enables live command registration; lifecycle hook starts the daemon
+  .gitattributes           # keeps scripts LF on any machine
   commands/
     descriptions.json      # Enable, Disable, Test Trigger
-    skyguard_cmd.py        # sends command to daemon
+    skyguard_enable.py     # one executable per command (FPP passes no fixed argument)
+    skyguard_disable.py
+    skyguard_test.py
   scripts/
     fpp_install.sh
     fpp_uninstall.sh
+    skyguard_start.sh      # shared by postStart.sh and callbacks
     postStart.sh           # launches daemon (+ supervisor)
     preStop.sh             # releases overlays, stops daemon
   skyguard/
     daemon.py              # main loop
+    supervisor.py          # restarts the daemon with capped backoff
+    commands.py            # command spool between FPP commands and the daemon
+    release.py             # releases everything the ledger holds, for uninstall
     config.py              # settings load/reload
     feeds/
-      base.py              # adapter interface + normalized record
+      base.py              # normalized record + shared parsing
+      http_client.py       # the only network code for feeds
       receiver.py          # readsb/dump1090/tar1090/dump978 JSON
-      online_adsbx_v2.py   # adsb.lol, adsb.fi, airplanes.live
+      online_adsbx_v2.py   # adsb.lol, adsb.fi
     feed_manager.py        # polling, health, fallback, data age
     geo.py                 # haversine, unit conversion, geocode
     trigger.py             # zone evaluation + state machine
     fpp_api.py             # all calls to http://localhost/api
-    overlay.py             # fixture -> overlay model control
+    overlay.py             # fixture -> channel range control + active-range ledger
     matrix.py              # text overlay messages
     notifier.py            # events + sinks
     status.py              # atomic status JSON writer
@@ -104,16 +115,34 @@ Each source is an adapter returning a normalized aircraft list, so new receivers
 | Adapter | Input | Notes |
 | --- | --- | --- |
 | Local receiver | `aircraft.json` from a user-entered URL on a separate Pi | Must accept readsb, dump1090-fa, tar1090 and dump978-fa formats (receiver software is undecided). Optional second URL for a separate 978 MHz decoder; aircraft lists combined by ICAO hex |
-| Online, ADSBx-v2-compatible | Point/radius query to the chosen provider | Provider picked from a list (initially adsb.lol, adsb.fi, airplanes.live — verify current endpoints and terms) |
+| Online, ADSBx-v2-compatible | Point/radius query to the chosen provider | Provider picked from a list; see Online providers. The radius is in nautical miles and the aircraft list is under `ac`, with `now` in milliseconds |
 | Online, keyed provider | Same, with a user API key | Optional; key stored in plugin config, never logged |
 
-Normalized aircraft record: `hex`, `callsign`, `lat`, `lon` (nullable), `alt_ft` (barometric, or `ground`), `gs_kt`, `track_deg`, `seen_pos_s`, `source`.
+Normalized aircraft record: `hex`, `callsign`, `lat`, `lon` (nullable), `alt_ft` (barometric, or `ground`, or null when not reported), `gs_kt`, `track_deg`, `seen_pos_s`, `source`.
+
+Receiver format notes: readsb, dump1090-fa and dump978-fa share one schema (`now` in seconds, `aircraft[]`, `alt_baro` a number or `"ground"`, `~` prefix on non-ICAO hex). readsb drops `lat`/`lon` once they are over 60 s old and may provide `lastPosition` instead, which is used as the last known position. `rr_lat`/`rr_lon` are rough receiver-based estimates and are not used as positions. Entries with no `hex` cannot be tracked; they are skipped and counted in the log.
+
+### Online providers
+
+| Provider | Endpoint | Minimum interval | Terms and status |
+| --- | --- | --- | --- |
+| adsb.lol (default) | `https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}` | 1 s | Limits are dynamic and an API key is planned. Live test returned 200; docs page unavailable when checked |
+| adsb.fi | `https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{nm}` | 1 s | Personal, non-commercial use only; the UI must credit and link adsb.fi. Repeated 4xx responses can restrict the IP. Live test returned 200 |
+
+airplanes.live was removed from the list on Nov 5, 2026. Its API returned 403 from the dev machine with a message asking developers to contact the operator at contact@airplanes.live. Don't use the internal data URLs behind its `globe.airplanes.live` map instead. It can return as one row here if the operator approves access for end users' devices.
+
+The query radius is capped at 250 nm. Any 4xx or 429 response counts as a failed poll and is never retried faster than the normal interval. While a provider keeps refusing, the online interval doubles per refusal up to 30 s and returns to normal on the first success, because repeated 4xx responses can get an address restricted. An immediate poll at show start still happens during this backoff.
 
 ### Polling
 
-- Poll the active feed every 1–2 s (user setting, default 1 s).
-- Each online provider has its own minimum interval; the plugin enforces the larger of the user setting and the provider minimum.
-- HTTP timeout per request: 3 s.
+- **Receiver:** always poll every 1–2 s (user setting, default 1 s), in or out of the show window, and also while the plugin is disabled.
+- **Online, inside the show window:** poll every 1–2 s (same setting). Each provider has its own minimum interval; the plugin enforces the larger of the user setting and the provider minimum.
+- **Online, outside the show window:** poll every `online_idle_interval_s` (default 30 s) so free services aren't hit once a second all year.
+- **Online, plugin disabled or center not set:** no online requests at all.
+- **Show window starts:** poll the active feed immediately, without waiting for the next interval.
+- FPP's status is read every 1 s regardless of the feed interval, so the start of a show is noticed quickly even at the 30 s online interval.
+- HTTP timeout per request: 3 s. Polling, health checks and the 978 decoder run on separate threads, so a dead host that takes the whole timeout to fail doesn't delay the others.
+- Requests send the User-Agent `fpp-plugin-SkyGuard`, ignore proxy settings, follow redirects only to http(s), and refuse responses over 16 MB. Errors and logs never contain a URL, because a URL can hold the home coordinates or a password.
 
 ### Receiver health and fallback (Both mode)
 
@@ -121,14 +150,27 @@ Normalized aircraft record: `hex`, `callsign`, `lat`, `lon` (nullable), `alt_ft`
 2. Two consecutive failed checks (about 20 s) → switch the active feed to online, log it, raise the fallback warning.
 3. While on online, keep health-checking the receiver every 10 s. When it passes, switch back automatically and clear the warning.
 
+No fallback happens while online requests aren't allowed (plugin disabled or center not set): the active feed stays the receiver and `receiver_lost` still shows. If online becomes allowed with the receiver still down, it falls back at once.
+
+### Second decoder (978 MHz)
+
+- The optional `receiver_978_url` is polled at the normal rate only while the receiver is the active feed. Its aircraft are merged into the receiver's list by hex.
+- Its failure never counts against the receiver. Data older than the max data age (at least 5 s) is dropped from the list.
+- If it fails for `health_interval_s` × `health_fail_count`, `receiver_978_lost` raises a warning, because UAT aircraft are no longer being seen. It clears when the decoder recovers.
+- If only `receiver_978_url` is set, it acts as the receiver.
+
 ### Data freshness (fail-safe)
 
 Separately from health checks, track the time since the last successful poll of the active feed.
 
+A poll is successful only if the feed's `now` has changed since the previous one. A decoder can die while its web server keeps serving the last `aircraft.json`, and a frozen file must not look like a healthy, possibly empty, sky. An unchanged `now` is not a failure for the first 3 s, since decoders write about once a second; after that it counts as a failed poll. Only change is checked, not the time itself, so a wrong clock on either device doesn't matter.
+
 - **Max data age** setting, default 5 s. If no successful poll within that time, force a blackout immediately (reason: `no_data`).
 - Setting 0 = blackout on the first failed poll.
 - Blackout holds until a feed (either one) delivers a successful poll again.
+- Data age only drives a blackout inside the show window. If a show starts while online data is older than max data age, the heads black out with reason `no_data` until the immediate poll succeeds and the release delay has passed. This fails dark on purpose, and can darken the first seconds of a show on an online feed.
 - If both feeds are down, the heads stay blacked out and the both-down warning shows until a feed returns.
+- With the default settings, a receiver failure in Both mode reaches max data age at about 5 s but doesn't fall back until about 20 s. The heads are therefore dark for roughly 15 s or more, plus the release delay, before the online feed can release them. This is the intended fail-dark behavior.
 
 No aircraft records are discarded for age or ground status; see the trigger engine.
 
@@ -138,7 +180,7 @@ The zone is one circle: a center lat/lon plus a radius, filtered by an altitude 
 
 ### Center point
 
-- Stored as decimal degrees (`center_lat`, `center_lon`).
+- Stored as decimal degrees (`center_lat`, `center_lon`) in `plugindata/fpp-plugin-SkyGuard/private.json`.
 - Set by manual entry, by address geocoding (backend calls a geocoding service on request only, result shown for the user to confirm), or by the browser's location (UI side; may need HTTPS, fall back to manual).
 
 ### Per-poll evaluation
@@ -146,23 +188,41 @@ The zone is one circle: a center lat/lon plus a radius, filtered by an altitude 
 For each aircraft in the active feed's list:
 
 1. **Distance:** great-circle (haversine) distance from center to `lat/lon`. In zone if distance ≤ `radius`.
-2. **Altitude:** in zone if `alt_floor_ft` ≤ altitude ≤ `alt_ceiling_ft`. An aircraft reporting `ground` counts as 0 ft. Default floor 0 so ground traffic counts.
-3. **No position** (altitude but no lat/lon): governed by the `count_no_position` toggle. ON = treat as in zone if its altitude passes the altitude filter; OFF = skip it but log it. Default ON (fail-safe).
-4. Stale positions are not discarded; the last known position is used.
+2. **Altitude:** in zone if `alt_floor_ft` ≤ altitude ≤ `alt_ceiling_ft`. An aircraft reporting `ground` counts as 0 ft. Default floor 0 so ground traffic counts. An aircraft inside the radius that reports no altitude counts as in zone (fail-safe).
+3. **No position** (altitude but no lat/lon): governed by the `count_no_position` toggle. ON = treat as in zone if its altitude passes the altitude filter; OFF = skip it but log it. Default ON (fail-safe). The owner will review this default against real receiver traffic during acceptance, because a receiver can hear position-less aircraft far outside the radius.
+4. An aircraft with neither position nor altitude tells us nothing and is skipped, whatever the toggle says.
+5. Stale positions are not discarded; the last known position is used.
 
 `aircraft_in_zone` = count of aircraft passing all checks.
+
+### Ignoring ground traffic
+
+`ignore_ground` is off by default, so the public default still counts everything. When it is on, an aircraft is skipped only if both of these are true. This is applied before the rules above and also covers aircraft with no position.
+
+1. The feed reports it on the ground (`alt_baro` is `ground`).
+2. Its reported ground speed is below `ground_speed_limit_kt`, or it reports no speed at all.
+
+At the limit the aircraft counts as taking off and counts as in the radius on that same poll, even while it still reports `ground`. A numeric altitude plays no part in this rule, and nothing depends on aircraft type. An aircraft that doesn't report `ground` always goes through the normal rules, however slowly it is moving, so a helicopter below the limit is counted unless it reports `ground`. A `ground` report with no speed is omitted because airport surface vehicles report this way and would otherwise hold a blackout for the whole show.
+
+A skipped aircraft is not part of `aircraft_in_zone`, the release delay or the matrix message. It stays in the status data and on the map, marked `ground (ignored)`. It is logged with the `ground_aircraft_ignored` event when it is first skipped inside the zone, not on every poll.
+
+**Limits:** this trusts the feed's `ground` report. An airborne aircraft that wrongly reports `ground` below the limit or with no speed is skipped, and so is an aircraft on its takeoff roll that reports no speed, until it reports a speed at the limit or a numeric altitude.
 
 ### States
 
 | State | Entered when | Heads |
 | --- | --- | --- |
-| IDLE | Outside the show schedule, or plugin disabled | Released; no overlays held |
+| IDLE | Outside the show schedule, plugin disabled, or center not set | Released; no overlays held |
 | CLEAR | In schedule, data fresh, `aircraft_in_zone` = 0 for ≥ release delay | Released to the sequence |
 | BLACKOUT | In schedule and (`aircraft_in_zone` ≥ 1, or data older than max data age) | Forced to off values |
 
 - Entering BLACKOUT happens on the same poll the condition is seen; no delay.
 - Leaving BLACKOUT requires the zone empty and data fresh continuously for `release_delay_s` (user setting, default 5 s; 0 = release immediately).
-- Every transition is logged with reason (`aircraft`, `no_data`, `test`, `schedule`) and the aircraft that caused it.
+- Entering the window with fresh data and an empty zone goes straight to CLEAR. The release delay applies only to leaving BLACKOUT.
+- Precedence, highest first: disabled, active test, center not set, outside the window, stale data, aircraft in zone. A test therefore works outside the show window and before the center is set, but not while disabled.
+- When a test ends, normal evaluation resumes at once with no release delay.
+- If the daemon restarts and its ledger shows ranges still held (see How the override is applied), it starts in BLACKOUT with reason `resume` and applies the normal rules from there.
+- Every transition is logged with reason (`aircraft`, `no_data`, `test`, `schedule`, `disabled`, `no_center`, `resume`, `clear`) and the aircraft that caused it. A reason change within BLACKOUT is logged too.
 
 Units: radius in miles or nautical miles or km (user choice, default statute miles), altitude in feet.
 
@@ -176,38 +236,68 @@ Each moving head is entered individually; the plugin overrides only that head's 
 | --- | --- | --- |
 | `name` | string | User label, e.g. "Roof head left" |
 | `enabled` | bool | Include this head in blackouts |
-| `universe` | int | Universe the head is on |
+| `universe` | int, optional | Universe the head is on |
+| `start_channel` | int ≥ 1, optional | Absolute FPP channel of DMX channel 1 on this head's output, for outputs with no universe number (USB DMX, DDP, some capes) |
 | `dimmer_ch` | int 1–512, optional | DMX channel of the dimmer within that universe (absolute address, not offset) |
 | `dimmer_off` | int 0–255, default 0 | Value forced during blackout |
 | `shutter_ch` | int 1–512, optional | DMX channel of the shutter within that universe |
 | `shutter_off` | int 0–255, default 0 | Value forced during blackout |
 
-At least one of `dimmer_ch` or `shutter_ch` is required. A head on a 16-bit dimmer can list both bytes later; phase 1 supports one channel each.
+Exactly one of `universe` or `start_channel` is required, and at least one of `dimmer_ch` or `shutter_ch`. A row that doesn't meet this is incomplete and ignored. A head on a 16-bit dimmer can list both bytes later; phase 1 supports one channel each.
 
 ### Universe to FPP channel
 
-The plugin converts (universe, DMX channel) to an absolute FPP channel by reading FPP's channel output configuration through the API (universe start channels), never from files. Re-resolve on startup and when FPP's outputs change. If a universe isn't found, mark that fixture invalid, log it, and raise a warning.
+The plugin converts (universe, DMX channel) to an absolute FPP channel by reading FPP's channel output configuration through the API, never from files: `GET /api/channel/output/universeOutputs`, then `channelOutputs[].universes[]` with `id`, `startChannel`, `channelCount`, `universeCount` and `active`. One entry can span several universes, so a universe `u` in an entry starts at `startChannel + (u − id) × channelCount`. Re-resolve on startup and when FPP's outputs change. If a universe isn't found, mark that fixture invalid, log it, and raise a warning. If the same universe appears on more than one active entry, use the first and log it.
 
 `fpp_channel = universe_start_channel + dmx_channel − 1`
 
+USB DMX outputs (`GET /api/channel/output/co-other`) have a start channel but no universe number, so those heads use the fixture's `start_channel`, giving `fpp_channel = start_channel + dmx_channel − 1`. Cape DMX ports have not been traced; use `start_channel` for them until they are.
+
 ### How the override is applied
 
-Preferred approach: one FPP Pixel Overlay Model per fixture channel (or per fixture, if dimmer and shutter are contiguous), created and owned by the plugin, named `SkyGuard-<fixture>-<dimmer|shutter>`, one channel per node.
+Each head channel is forced with an FPP overlay channel range. Ranges were chosen over overlay models because creating a model means replacing FPP's whole model list and restarting fppd, which would leave a newly added head unprotected until the next restart. Ranges need no restart, touch no FPP configuration, and apply after overlay models on every output frame.
 
-- **Blackout:** set the model to an opaque/active state and fill it with the off value, so it overrides the running sequence for that channel only.
-- **Release:** set the model state to disabled so the sequence's values pass through.
-- **Cleanup:** remove the plugin's models on uninstall (via the API), and release them on fppd stop.
+- **Blackout:** `PUT /api/overlays/range/<ch>-<ch>` with body `{"Value":<off value>}`. Channels with the same value share one request (`10-10,11-11`), up to 100 per request.
+- **Hold:** repeat that PUT about every 2 s during BLACKOUT. It is idempotent, ranges can't be read back, and this restores them after an fppd restart or another plugin's `deleteAll`.
+- **Release:** always PUT the value first, then PUT `{"delete":true}`. **This order is a safety requirement.** On FPP 9.5 through 10.2, deleting a range that doesn't exist adds it with value −1, which writes 0xFF (full on). It is fixed in 10.3. A small risk remains if fppd restarts between the two calls.
+- **Never** use `deleteAll`, which would also remove other plugins' ranges.
+- **Cleanup:** release on fppd stop and on uninstall, again set then delete.
+- **Failures:** a failed set is retried on the next loop and never followed by a delete. A failed delete leaves the channel dark and retries. Either one raises `overlay_failed`, because the heads may not be doing what SkyGuard intends.
+- **Channel checks:** a DMX channel past the end of its universe, or an absolute channel past fppd's limit of 8,388,608, makes that channel invalid instead of landing on another prop. FPP 9.5 doesn't check that limit itself.
+- **Shared channels:** two heads may share a channel with the same off value. With different values, the first head keeps it and the second is flagged invalid.
 
-The exact API calls for creating overlay models and setting state/fill on 9.5 must be verified first (see Items to verify). If overlay models can't be created via the API on 9.5, stop and report options rather than editing FPP's model file.
+Limits: Channel Tester, other plugins' `modifyChannelData` and output processors all run after overlays, so they can still change these channels. SkyGuard must run on the FPP that outputs to the heads; a blackout on a player doesn't affect a remote playing its own copy of the sequence.
+
+### Active-range ledger
+
+The daemon records the channels it holds and their values, plus each matrix model it changed and that model's original state, in `plugindata/fpp-plugin-SkyGuard/active_ranges.json` (atomic write). A channel is added before its range is set and removed only after its delete succeeds, so the ledger can overstate what is held but never understate it. On restart the ledger, not the current fixture list, says what to release, so channels from a fixture edited or removed while the daemon was down are still released.
+
+### If the daemon crashes
+
+Ranges live in fppd's memory, not in the daemon, so they outlast it.
+
+| Situation | What the heads do |
+| --- | --- |
+| Crash during BLACKOUT | Stay at their off values, with pan, tilt, color and everything else still following the sequence. The heads fail dark |
+| Supervisor restarts the daemon | It reads the ledger, resumes in BLACKOUT with reason `resume`, re-sends the ranges, and releases only after the normal rules are met (zone empty and data fresh for `release_delay_s`, or IDLE) |
+| Daemon keeps crashing | Heads stay dark for as long as it stays down. The supervisor retries forever with a capped backoff |
+| fppd restarts while the daemon is down | Ranges are lost, so heads follow the sequence until the daemon is back. `postStart.sh` starts it if it isn't running |
+| Crash during CLEAR | Nothing is held, so the heads are unprotected until the daemon returns. This is the gap the supervisor exists to shorten |
+| Daemon and supervisor both killed | Held ranges stay and nothing restarts until the next fppd start |
+| Ledger corrupt | Resume in BLACKOUT holding the channels of all current fixtures, release them under the normal rules, and warn that a removed fixture's range could stay until fppd restarts |
+| Ledger missing | Treated as a first start: nothing has been held. A file deleted by hand could leave a range held until fppd restarts |
+
+While the daemon is down it can't report anything itself, so the `headerIndicator` endpoint in `api.php` checks the age of the status file and shows a danger icon when it is stale.
 
 ## Schedule awareness
 
 SkyGuard protects the whole scheduled show window, including gaps between songs, and sits IDLE outside it.
 
 - "In schedule" = FPP's scheduler reports a scheduled playlist active now, or a playlist/sequence is playing (manual starts count too, so a show started by hand is protected).
-- Read this from the FPP status API every poll cycle (or at least every 5 s); verify the exact status fields on 9.5.
-- Entering the window: start evaluating immediately; if an aircraft is already in the zone, black out on the first poll.
-- Leaving the window: release all overlays and go IDLE. Keep polling the feed (cheaply) so status and the future map view stay current.
+- Read `GET /api/fppd/status` every 1 s. In schedule when `status` is non-zero, or `bridging` is true (live E1.31 or Art-Net input driving the outputs with no playlist), or `scheduler.status` is `playing` or `manual`, or `status_name` is anything other than `idle`. Master reports `playing background` with `status` still 0, and `status_name` covers it. Treat an unreachable or unparseable status as in schedule (fail-safe).
+- Bridged data counts as a show, so heads can black out during an xLights test session if an aircraft is nearby. `bridging` comes from FPP's `HasBridgeData()`, on 9.5 and master; it has not yet been seen going true on a real box.
+- Entering the window: start evaluating immediately and poll the active feed at once; if an aircraft is already in the zone, black out on the first poll.
+- Leaving the window: release all overlays and go IDLE. Keep polling the feed (see Polling) so status and the future map view stay current.
 - Feed polling and health checks continue while IDLE so warnings are accurate before the show starts.
 
 ## Matrix message
@@ -215,7 +305,10 @@ SkyGuard protects the whole scheduled show window, including gaps between songs,
 When a blackout starts, SkyGuard can optionally show a message on one or more LED matrices; the message clears when the zone clears. Because it is drawn on FPP Pixel Overlay Models, the same text also appears on FPP's Virtual Display.
 
 - **Targets:** a list of existing Pixel Overlay Model names (the user's LED panels), chosen by the user. The plugin never creates or edits these models.
-- **Mechanism:** FPP's text overlay effect on the model (the "Overlay Model Effect" command with a Text effect, or the equivalent API call — verify on 9.5). On clear, stop the effect and return the model to its prior state (disabled unless the user had it enabled).
+- **Mechanism:** `POST /api/command/Overlay Model Effect` with a JSON array: `[model, "False", "Text", color, font, size, "false", position, speed, 0, text]`. Arguments are positional and identical on 9.5 and master. Fonts come from `GET /api/overlays/fonts`.
+- **Showing:** read the model's state from `isActive` on `GET /api/overlays/model/<name>` and record it in the ledger. If it was disabled, set it enabled with `PUT .../state` first. Auto-enable isn't used, because it makes Center text stop after 25 ms.
+- **Clearing:** send `[model, "Enabled", "Stop Effects"]` for a model that was disabled, which stops the effect and disables the model, or `[model, "False", "Stop Effects"]` for one the user had on, which keeps its state. No state call follows, because on current FPP that would cancel a pending stop.
+- These details come from FPP's source and still need a box test.
 - **Message:** a custom string with optional placeholders, filled from the closest in-zone aircraft:
 
 | Placeholder | Value |
@@ -227,36 +320,52 @@ When a blackout starts, SkyGuard can optionally show a message on one or more LE
 | `{heading}` | Track in degrees |
 | `{count}` | Number of aircraft in zone |
 
-- **Updates:** refresh the text when its values change, no more than once every 2 s to avoid flicker.
+- **Updates:** Center text refreshes when its values change, no more than once every 2 s to avoid flicker. A scrolling message appears to make one pass and end, and restarting it mid-pass would mean a changing `{distance}` kept it from ever finishing. It is therefore replaced with the latest text only when `effectRunning` shows the pass has ended, which also keeps it repeating.
+- **Missing values** show as `--`. During the release delay, the zone is empty, so the placeholders keep describing the last aircraft.
+- **Failures** are logged once per model and never affect the blackout.
 - **Options:** text color, font, size, scroll speed/position are plain settings with defaults; their UI is deferred.
 - **No-data blackouts:** use a separate message (default "Aircraft data offline – lights paused"), optional.
 - If no matrix is configured, skip silently.
 
 ## Warnings and notification events
 
-Feed problems surface in FPP's warning banner at the top of every FPP page; all events go through one internal notification layer so text/push alerts can be added in phase 2 without touching the trigger engine.
+FPP has no way for a plugin to raise a banner warning: warnings are raised only inside fppd, with no HTTP route on 9.5 or master. Feed problems therefore surface through FPP's plugin header indicator, an icon shown on every FPP page, plus the status data and the log. All events go through one internal notification layer so text/push alerts can be added in phase 2 without touching the trigger engine.
 
 ### Events
 
 | Event | Fired when | Phase 1 action |
 | --- | --- | --- |
-| `receiver_lost` | 2 failed receiver health checks | Banner warning + log |
-| `fallback_active` | Switched to online feed | Banner warning + log |
+| `receiver_lost` | 2 failed receiver health checks | Warning + log |
+| `fallback_active` | Switched to online feed | Warning + log |
 | `receiver_restored` | Receiver passes a health check after loss | Clear warnings + log |
-| `all_feeds_down` | No feed delivering data | Banner warning + log |
+| `fallback_ended` | Left the online feed with the receiver still down, because online is no longer allowed | Clear the fallback warning + log |
+| `receiver_978_lost` / `receiver_978_restored` | The 978 decoder fails for the health window / recovers | Raise / clear warning + log |
+| `all_feeds_down` | The last feed left to try is failing and its data is older than max data age. Not raised while online is switched off by design, or while Both mode is still waiting on health checks | Warning + log |
 | `feeds_restored` | A feed delivers data after all were down | Clear warning + log |
 | `blackout_started` | CLEAR → BLACKOUT | Log (plus matrix message) |
 | `blackout_cleared` | BLACKOUT → CLEAR | Log |
-| `fixture_invalid` | A fixture's universe can't be resolved | Banner warning + log |
+| `fixture_invalid` | A fixture's universe can't be resolved | Warning + log |
+| `fixture_resolved` | That fixture resolves again or is removed | Clear warning + log |
+| `overlay_failed` / `overlay_restored` | FPP refuses or misses a channel set or delete / all succeed again | Raise / clear warning + log |
+| `internal_error` / `internal_ok` | The main loop hits an unexpected error / a step completes normally | Raise / clear warning + log |
+| `plugin_disabled` / `plugin_enabled` | Disable / Enable command | Raise / clear "SkyGuard disabled" + log |
+| `center_unset` / `center_set` | Center missing / provided | Raise / clear warning + log |
+| `ground_aircraft_ignored` | An aircraft in the zone is first skipped as on the ground | Log |
 
 ### Notifier interface
 
 - `Notifier.emit(event, details)` dispatches to registered sinks.
-- Phase 1 sinks: `LogSink`, `FPPWarningSink`.
+- Phase 1 sinks: `LogSink`, `WarningSink` (keeps the active warnings for the status file and header indicator).
 - Phase 2 adds `SmsSink` / push sinks with user-chosen events; nothing else changes.
 - Rate-limit repeated identical events (e.g. one `all_feeds_down` per outage, not per poll).
 
-How a Python plugin raises and clears FPP banner warnings on 9.5 must be verified. If no supported API exists, show the warning in the plugin's status data and log it, and report back.
+### Unexpected errors
+
+The main loop never stops on an unexpected error. It logs the error and raises `internal_error`, because what the heads are doing is then unknown. During a show with the plugin enabled, it holds every resolved fixture dark until a step completes normally, when `internal_ok` clears the warning and the normal rules apply. Outside a show or while disabled, it holds nothing.
+
+The channel ranges are applied before anything slower in each step, and the matrix runs on its own thread, so a slow panel call can't delay a blackout.
+
+The header indicator is served from `api.php` at `/api/plugin/fpp-plugin-SkyGuard/headerIndicator`, which FPP calls with a 1 s timeout on its status updates, so it must only read the status file. It returns `visible`, `icon`, `color` (a CSS variable such as `var(--bs-danger)`), `tooltip`, `link` and `animate`. The icon appears only when a warning is active or the status file is stale. Header indicators exist on 9.5 and master but haven't been tested on a box yet.
 
 ## FPP commands and status API
 
@@ -270,15 +379,29 @@ SkyGuard registers three FPP commands and serves one read-only status endpoint t
 | SkyGuard Disable | none | Releases all overlays, goes IDLE, raises a "SkyGuard disabled" warning so it's never off silently |
 | SkyGuard Test Trigger | seconds (default 10) | Forces BLACKOUT for N seconds with reason `test`, including matrix message, then normal evaluation resumes |
 
-Command scripts pass the request to the running daemon over a local-only channel inside the plugin's own directory (e.g. a Unix socket). They must return quickly.
+Command scripts pass the request to the daemon through a spool folder, `plugindata/fpp-plugin-SkyGuard/commands/`: each drops a small JSON file and exits, and the daemon reads the folder every 0.25 s. A spool opens no port, so nothing new is reachable on the network. They must return quickly: fppd waits for each one to exit.
 
-A `callbacks` script is required so commands live-register on install without an fppd restart (guidelines §2.8).
+- Enable and Disable apply at once in memory and are saved through `PUT /api/plugin/fpp-plugin-SkyGuard/settings/enabled`, retried if FPP doesn't answer. They also take effect if sent while the daemon is down.
+- A Test Trigger older than 30 s is ignored, so one requested during an outage can't fire later. Its length must be 1–3600 s, otherwise the default of 10 s is used.
+- Unreadable command files are logged and removed.
+
+- FPP runs a command script directly with `execve`, so each needs a shebang and an exec bit, committed explicitly (`git update-index --chmod=+x`) because development is on Windows.
+- Its environment contains only `MEDIADIR`, `FPPDIR` and `SCRIPTDIR`.
+- Each command in `descriptions.json` names its own script and no fixed argument can be passed, hence one small script per command.
+
+A `callbacks` script is required so commands live-register on install without an fppd restart (guidelines §2.8). Live load exists from FPP 10.0. FPP 9.5 has no load route and reads commands only at fppd startup, so on versions below 10.0 `fpp_install.sh` and `fpp_uninstall.sh` must set `restartFlag`.
 
 ### Status endpoint
 
-Served through the template's `api.php` at `/api/plugin/fpp-plugin-SkyGuard/status`, reading a status JSON the daemon rewrites every poll (atomic write in `plugindata/`).
+Served through the template's `api.php` at `/api/plugin/fpp-plugin-SkyGuard/status`, reading a status JSON the daemon rewrites (atomic write in `plugindata/`). It writes at once when the state, reason, enabled setting, show window, active feed, in-zone count or warnings change, and otherwise every 5 s. That matches the 5 s map refresh and spares the SD card a write every second all year.
 
 Fields: `state`, `reason`, `enabled`, `in_schedule`, `active_feed`, `receiver_ok`, `last_data_age_s`, `aircraft_in_zone`, `center`, `radius`, `aircraft[]` (normalized records with `distance` and `in_zone`), `fixtures[]` (name, resolved channels, valid), `warnings[]`, `updated_at`.
+
+Each `aircraft[]` record also carries `ground_ignored`, and a `note` of `ground (ignored)` when that is true.
+
+`api.php` adds `running`, false when the status file is missing or over 30 s old. It serves the status file as is and never reads `private.json`.
+
+`center` is needed by the map, so the home coordinates remain readable by anyone who can reach FPP's API, even though they are stored privately. The API key is never returned.
 
 The `aircraft[]` list covers everything the feed returns within a display range (default 2× radius), so the phase-2 map has context. Document the route in `apiDocs.json`.
 
@@ -288,7 +411,7 @@ The `aircraft[]` list covers everything the feed returns within a display range 
 
 ## Settings reference
 
-Every setting below lives in `config/plugin.fpp-plugin-SkyGuard` except the fixture list (`fixtures.json`). The daemon reloads settings on change without an fppd restart.
+Every setting below lives in `config/plugin.fpp-plugin-SkyGuard` except the fixture list (`fixtures.json`) and the private values marked below (`private.json`, mode 0600). The daemon reloads settings on change without an fppd restart. The file format is FPP's `key = "value"`.
 
 | Key | Default | Notes |
 | --- | --- | --- |
@@ -297,22 +420,25 @@ Every setting below lives in `config/plugin.fpp-plugin-SkyGuard` except the fixt
 | `receiver_url` | empty | e.g. `http://<receiver-ip>/data/aircraft.json` |
 | `receiver_978_url` | empty | Optional second decoder |
 | `online_provider` | adsb.lol | From the provider list |
-| `online_api_key` | empty | Keyed providers only; never logged |
+| `online_api_key` | empty | **Private.** Loaded but not sent yet: none of the current providers takes a key. Never logged, never in a URL |
 | `poll_interval_s` | 1 | 1–2; floored at provider minimum for online |
+| `online_idle_interval_s` | 30 | Online feed outside the show window, 5–300. Receiver polling isn't affected |
 | `health_interval_s` | 10 | Receiver health check |
 | `health_fail_count` | 2 | Misses before fallback |
 | `max_data_age_s` | 5 | 0 = blackout on first failed poll |
-| `center_lat` / `center_lon` | empty | Plugin stays IDLE with a warning until set |
+| `center_lat` / `center_lon` | empty | **Private.** Plugin stays IDLE with a warning until set |
 | `radius` / `radius_unit` | 10 / mi | `mi`, `nm`, `km` |
 | `alt_floor_ft` / `alt_ceiling_ft` | 0 / 10000 | Inclusive |
 | `count_no_position` | true | Aircraft with altitude but no position count as in zone |
+| `ignore_ground` | false | Skip aircraft on the ground; see Ignoring ground traffic |
+| `ground_speed_limit_kt` | 40 | With `ignore_ground` on, aircraft reporting `ground` are skipped below this speed or with no speed. 5–100 |
 | `release_delay_s` | 5 | 0 = immediate release |
 | `matrix_enabled` | false | |
 | `matrix_models` | empty | List of overlay model names |
 | `matrix_message` | "Aircraft overhead: {callsign} at {altitude} ft" | Custom text with placeholders |
 | `matrix_nodata_message` | "Aircraft data offline – lights paused" | Empty = none |
-| `matrix_color` / `matrix_font` / `matrix_size` / `matrix_speed` | sensible defaults | Verify available fonts via API |
-| `geocoder` | Nominatim (OpenStreetMap) | Verify usage policy; send a proper User-Agent |
+| `matrix_color` / `matrix_font` / `matrix_size` / `matrix_position` / `matrix_speed` | `#FF0000` / empty, meaning `FreeSansBold` or another plain font if FPP lists one, otherwise the first it lists / 18 / `Right to Left` / 40 | Fonts from `GET /api/overlays/fonts` |
+| `geocoder` | `nominatim` | `nominatim` or `off`. The policy requires a way to switch it off without a software update. Send an identifying User-Agent, at most 1 request/s, no autocomplete, and don't repeat identical queries |
 
 ## pluginInfo.json and privacy
 
@@ -322,19 +448,20 @@ A `privacy` block is required for listing; generate it with the [Privacy disclos
 
 - `repoName`: `fpp-plugin-SkyGuard`; `name`: SkyGuard.
 - `description`: one or two sentences saying it blacks out moving-head light output when aircraft are within a set radius, using a local ADS-B receiver or online flight data.
-- `versions[]`: minimum FPP 9.5; platforms Raspberry Pi and BeagleBone.
+- `versions[]`: minimum FPP 9.5; `platforms` must use the exact strings `Raspberry Pi`, `BeagleBone Black` and `BeagleBone 64`.
 - `dependencies`: declare any pip/apt packages (FPP 10+ only; also install them in `fpp_install.sh` for 9.5).
-- Category: pick from fpp-data's `pluginCategories.json`.
+- Category: chosen in the fpp-data listing request, not in this file. Use `Hardware` (Hardware, Controls & Animatronics) unless a reviewer prefers otherwise.
 - `bugURL`, `homeURL`, license (GPLv2), icon.
+- **`api.php` risk:** FPP 9 has no protection against a plugin's `api.php` failing to parse, so one syntax error there takes down every plugin's API routes. Run `php -l api.php` on a real FPP box before anything reaches a 9.x install.
 
 ### What the privacy block must disclose
 
 | Data / connection | Detail |
 | --- | --- |
-| Stored location | Home latitude/longitude stored locally in plugin config |
-| Online flight feed | Center point and radius sent to the chosen provider on every poll when online mode is active |
+| Stored location | Home latitude/longitude stored locally in `plugindata/` and returned by the status endpoint to anyone who can reach FPP |
+| Online flight feed | Center point and radius sent to the chosen provider on every online poll: every 1–2 s during a show and about every 30 s otherwise, and never while disabled or with no center set. Not alwaysOn |
 | Geocoding | Typed address sent to the geocoding service, only when the user presses lookup |
-| Map tiles | The viewer's browser loads map tiles from the tile provider (e.g. OpenStreetMap) while the status or location map is open |
+| Map tiles | Added in phase 1b, not yet in the block because the map doesn't exist yet. The viewer's browser loads map tiles from `tile.openstreetmap.org` while the status or location map is open. Needs `ManageApacheContentPolicy.sh add img-src`, and a `sends` entry with `what`: "your browser's address" |
 | Local receiver | Requests to a user-entered address on the LAN |
 | API key | Optional third-party key stored locally |
 | No telemetry | Nothing sent anywhere else; no usage data collected |
@@ -347,14 +474,15 @@ The daemon starts with fppd and stops with it; every hook returns in well under 
 
 | Script | Does |
 | --- | --- |
-| `scripts/fpp_install.sh` | Source `${FPPDIR}/scripts/common`; install deps with `apt-get`/`pip --break-system-packages` if missing; create `plugindata/fpp-plugin-SkyGuard/`; write default settings only where unset. Idempotent |
-| `scripts/postStart.sh` | If not already running (PID file check), launch the daemon in the background with nohup, output appended to `$PLUGIN_LOG`, and return |
-| `scripts/preStop.sh` | Tell the daemon to release all overlays and exit; wait at most ~2 s, then kill by PID |
-| `scripts/fpp_uninstall.sh` | Stop the daemon; delete the plugin's overlay models via the API; remove `plugindata/fpp-plugin-SkyGuard/`. Every step tolerates "already gone" |
-| `callbacks` | Minimal script so commands live-register on install (guidelines §2.8) |
+| `scripts/fpp_install.sh` | Source `${FPPDIR}/scripts/common`; confirm `python3` exists (there are no other dependencies, so nothing is installed); create `plugindata/fpp-plugin-SkyGuard/` and its `commands/` folder, and `private.json` at mode 0600 if missing; set `restartFlag` if FPP is below 10 or its version can't be read. Defaults live in the code, so no settings are written. Idempotent |
+| `scripts/postStart.sh` | If not already running (PID file check), launch the supervisor and daemon in the background with nohup and return. The daemon opens the log itself with `WatchedFileHandler`, because a shell redirect would keep writing to the rotated file (guidelines §1.2) |
+| `scripts/preStop.sh` | Run `python3 -m skyguard.supervisor stop`: send SIGTERM to the verified supervisor PID, which stops the daemon so it can release all overlays; wait at most ~2 s, then kill. A PID is signalled only if `/proc/<pid>/cmdline` shows it is ours |
+| `scripts/fpp_uninstall.sh` | Stop the daemon; release every ledger range via the API (set then delete); remove the CSP entry once phase 1b adds one; set `restartFlag` if FPP is below 10 or its version can't be read; unless `FPP_PLUGIN_REINSTALL` is `1`, remove `plugindata/fpp-plugin-SkyGuard/` and the plugin config. Every step tolerates "already gone" |
+| `callbacks` | Answers `--list` with `lifecycle`, so commands live-register on install (guidelines §2.8). Its `startup` hook starts the daemon if it isn't running, because `postStart.sh` doesn't run on a live install. Returns immediately. A file lock means a second start exits, since both can run at fppd startup |
 
 - No systemd unit, cron or files outside the plugin dir, `plugindata/`, the plugin config and the log.
-- Daemon crash safety: overlay state lives in fppd, so if the daemon dies the heads keep their last state; a crash during CLEAR leaves them unprotected. To keep the fail-safe, the daemon should restart itself via a lightweight supervisor loop in `postStart.sh`'s background process (with backoff), and log each restart. Flag this design choice in the review.
+- Daemon crash safety: range state lives in fppd, so if the daemon dies the heads keep their last state (see If the daemon crashes). To keep the fail-safe, `skyguard/supervisor.py` restarts the daemon with a backoff of 1, 2, 5, 10, then 30 s, never gives up, logs each restart, and starts the backoff over after a 60 s run. Any daemon exit is restarted, including a clean one; only an explicit stop ends it. If the supervisor itself is killed, the next start stops any daemon it left behind, because two daemons would fight over the same ranges. A clean stop releases the channels before anything else, since the stop has a short time budget. Flag this design choice in the review.
+- `plugindata/` files must be readable and writable by both the daemon (root) and the PHP pages (user `fpp`), so `fpp_install.sh` sets their owner to `fpp`, keeping `private.json` at mode 0600.
 
 ## User interface
 
@@ -367,7 +495,8 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 - Phone-first: works from a 320 px phone to desktop with no horizontal page scroll; finger-sized tap targets, no hover-only actions.
 - Settings save FPP-style, each field on change.
 - Units: imperial by default (mi, ft, kt), metric selectable (`units` setting).
-- Bundle any JavaScript library (e.g. a map library) inside the plugin rather than loading it from a CDN at runtime.
+- Bundle any JavaScript library inside the plugin rather than loading it from a CDN at runtime. The map uses Leaflet (BSD-2-Clause; keep its license notice).
+- Map tiles: show the OpenStreetMap attribution visibly on the map, keep the tile URL configurable, and don't prefetch or store tiles. Confirm FPP's pages send a valid Referer, which the tile policy requires. When adsb.fi is the selected provider, credit and link it.
 
 ### Menu entries (`menu.inc`, one per type)
 
@@ -388,10 +517,10 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 | Tab | Contents |
 | --- | --- |
 | Data Source | Source mode; receiver URL and optional 978 URL with a Test button (shows aircraft seen or the error); online provider dropdown, masked API key field, Test button |
-| Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); Use my location button (disabled with a note when the page isn't HTTPS); display-only map of the center point and radius circle (no draggable pin); radius + unit; altitude floor and ceiling |
-| Fixtures | Table, one row per head: name, universe, dimmer ch, dimmer off, shutter ch, shutter off, enabled. Add, duplicate, delete. Per-row Test button blacks out that head only for 3 s |
+| Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); Use my location button (disabled with a note when the page isn't HTTPS); display-only map of the center point and radius circle (no draggable pin); radius + unit; altitude floor and ceiling; "Ignore aircraft on the ground" switch |
+| Fixtures | Table, one row per head: name, universe or start channel, dimmer ch, dimmer off, shutter ch, shutter off, enabled. Add, duplicate, delete. Per-row Test button blacks out that head only for 3 s |
 | Matrix Message | Enable switch; panel picker from the FPP overlay model list; message field with click-to-insert placeholder buttons; live preview with sample values; no-data message; color, font, size, speed |
-| Advanced (collapsed) | Poll interval, health interval, fail count, max data age, release delay, count-no-position toggle, units |
+| Advanced (collapsed) | Poll interval, online idle interval, health interval, fail count, max data age, release delay, count-no-position toggle, ground speed limit, units |
 
 **Fixture row validation:** a row takes effect only when its required fields are filled and valid. Until then it shows an "Incomplete" badge and the trigger engine ignores it. A row whose universe can't be resolved shows "Universe not found".
 
@@ -401,9 +530,9 @@ Top to bottom on a phone:
 
 1. **State badge:** CLEAR, BLACKOUT or IDLE with its reason, in Bootstrap semantic colors.
 2. **Controls:** Enable/Disable switch (confirmation before disabling) and Test Trigger button.
-3. **Map:** center point, radius circle, aircraft icons rotated to heading and labeled with callsign, altitude and speed; in-zone aircraft highlighted. Refreshes every 5 s from the status endpoint.
+3. **Map:** center point, radius circle, aircraft icons rotated to heading and labeled with callsign, altitude and speed; in-zone aircraft highlighted; skipped ones marked `ground (ignored)`. Refreshes every 5 s from the status endpoint.
 4. **No-internet fallback:** if map tiles don't load, a theme-aware radar plot (range rings, radius circle, aircraft dots) drawn from the same data.
-5. **Aircraft list button:** opens a full-screen list (callsign, altitude, speed, distance, in zone) with a back button; same 5 s refresh.
+5. **Aircraft list button:** opens a full-screen list (callsign, altitude, speed, distance, in zone, or `ground (ignored)`) with a back button; same 5 s refresh.
 6. **Health:** active feed, receiver health, data age, aircraft count, per-fixture status, current warnings.
 7. **Recent events:** last 20 blackout transitions with time, reason and aircraft.
 
@@ -418,22 +547,54 @@ Setup walkthrough, how the blackout works (which channels, fail-safe behavior), 
 - `api.php` gains fixture endpoints: list, add, update and delete one row, so rows save on change.
 - New settings: `units`, `setup_state`.
 
-## Items Claude Code must verify before building
+## Verification results
 
-These assumptions were not confirmed during planning. Verify each against FPP 9.5 source/API docs (and current FPP master) first, and stop to report if one fails rather than working around a guideline.
+Checked Nov 5, 2026 by reading FPP 9.5 and master source, FPP tags 10.0–10.3 for the two version-specific behaviors, provider and policy pages, and receiver source. API requests, including approved write tests through SkyGuard's own controllers, were then run against a spare Pi 4 on FPP 10.3 (Debian 13) with no heads, panel or sequence. **Box test** marks what still needs one.
 
-1. **Overlay models via API:** can a plugin create, update and delete a Pixel Overlay Model over an arbitrary channel range (1 channel per node) through the HTTP API on 9.5? Exact endpoints and payloads for set state (opaque vs. transparent vs. disabled) and fill with a value.
-2. **Override behavior:** does an opaque overlay fill truly override sequence data for only those channels while the rest of the universe follows the sequence? Test on hardware with a running sequence.
-3. **Universe lookup:** which API returns universe-to-start-channel mapping for the user's DMX path (E1.31/Art-Net universes vs. a controller or cape with a native DMX port)? Handle both if they differ.
-4. **Schedule status:** which fields of the FPP status API indicate "inside a scheduled window" vs. "playing," on 9.5 and current releases.
-5. **Banner warnings:** a supported way for a Python plugin to raise and clear FPP banner warnings.
-6. **Text overlay:** the command/API for the Text overlay effect on a model, its arguments (font, size, color, scroll), and how to stop it.
-7. **Online providers:** current endpoints, response format, rate limits and terms for adsb.lol, adsb.fi, airplanes.live; set per-provider minimum poll intervals from them.
-8. **Receiver formats:** field names in `aircraft.json` for readsb, dump1090-fa, tar1090 and dump978-fa (`lat/lon`, `alt_baro` incl. "ground", `gs`, `track`, `flight`, `seen_pos`, `now`).
-9. **Geocoder:** Nominatim usage policy (rate limit, User-Agent), or a better free option.
-10. **Commands without a native plugin:** confirm the `commands/descriptions.json` + script format for a script plugin on 9.5 and that the `callbacks` script enables live registration.
-11. **Map:** a map library that can be bundled in the plugin under a GPL-compatible license, and the tile provider's usage policy (attribution, rate limits).
-12. **Plugin API saves:** how `api.php` endpoints in a plugin accept POST/PUT on 9.5, for the fixture endpoints.
+Seen on the real 10.3 box:
+
+- **A PHP route answers 404 to a request with a JSON `Content-Type` and no body** (`/api/channel/...`, `/api/plugin/...`). The client therefore sends that header only with a JSON body. Settings are saved as a bare value, as FPP's own pages do. Routes proxied to fppd (`/api/overlays/...`, `/api/command/...`, `/api/fppd/...`) aren't affected.
+- **A sequence started on its own reports `status` 0 and `scheduler.status` `idle`; only `status_name` says `playing`.** `status_name` is therefore essential to detecting a show started by hand. When stopped, it returned to `idle` within 0.2 s. A scheduled playlist, and the gap between its items, hasn't been observed yet. `warnings` is left out of the status when there are none.
+- `universeOutputs` returns `{"enabled": 0, "channelCount": -1, "universes": []}` when no universes are set up.
+- The Text effect's first eight arguments match this spec; 10.3 adds optional color arguments after them. `isActive` and `effectRunning` are on `GET /api/overlays/model/<name>`.
+- `/api/plugin/headerIndicators` exists, and the range, state and settings routes are in FPP's API documentation.
+- **Channel ranges:** FPP accepted set, repeat set and set-then-delete for one-channel ranges, including the batched form, both idle and during a playing sequence. Their effect on real output wasn't observable on this box, whose channel outputs are off.
+- **Center text:** with the model enabled first and auto-enable off, the text was still in the model's buffer after 3 s. Stop Effects with `Enabled` returned the model to disabled and emptied the buffer in about 0.1 s. A model that was already enabled stayed enabled with its effect stopped.
+- **Scrolling text:** `effectRunning` was true during the pass and false after it, with the model still enabled, confirming that a pass ends by itself. Sending the text again started a new pass, and stopping mid-pass disabled the model.
+
+| # | Item | Result |
+| --- | --- | --- |
+| 1 | Overlay models via API | **Failed as originally specified.** Creating a model takes a whole-list `POST /api/models` and an fppd restart. Replaced by channel ranges, which FPP 10.3 accepted. **Box test** on 9.5 |
+| 2 | Override behavior | Source confirms a range writes only its own channels on each output frame, after the sequence and overlay models. **Box test** with a running sequence and real heads |
+| 3 | Universe lookup | See Universe to FPP channel. **Box check** of the user's actual output configuration; cape DMX ports not traced |
+| 4 | Schedule status | See Schedule awareness. Idle and a sequence started by hand confirmed on 10.3. **Box check** of a scheduled playlist and the gap between its items |
+| 5 | Banner warnings | **No supported API.** Replaced by header indicator, status data and log. **Box test** of the indicator after the build |
+| 6 | Text overlay | See Matrix message. Display state, scrolling, stop and restore confirmed on 10.3. **Box test** on 9.5, and of how it looks on a real panel, non-ASCII text, and Virtual Display |
+| 7 | Online providers | adsb.lol and adsb.fi tested live. airplanes.live removed (see Online providers) |
+| 8 | Receiver formats | Confirmed from documentation or source for readsb, dump1090-fa and dump978-fa. tar1090 reuses the decoder's JSON (not independently checked). **Box check** with a real file from the user's receiver |
+| 9 | Geocoder | Nominatim is acceptable for a user-pressed lookup under its [usage policy](https://operations.osmfoundation.org/policies/nominatim/); see the `geocoder` setting |
+| 10 | Commands | Format confirmed. Live load exists from 10.0, not on 9.5. **Box test** after the build |
+| 11 | Map | Leaflet (BSD-2-Clause). [OSM tile policy](https://operations.osmfoundation.org/policies/tiles/) reviewed. **Box check** of tile loading and Referer in phase 1b |
+| 12 | Plugin API saves | Confirmed on 9.5: `api.php` endpoints may use GET, POST, PUT or DELETE. **Box test** after the build |
+
+### Owner decisions, Nov 5, 2026
+
+1. Use channel ranges instead of overlay models.
+2. Add an optional fixture `start_channel` for outputs with no universe number.
+3. Add a header indicator alongside status data and the log.
+4. Keep the API key and the home coordinates in `plugindata/` (`private.json`, mode 0600).
+5. Slow only the online feed outside the show window (30 s), and stop it when disabled. Receiver polling stays fast. Poll immediately when the show window starts.
+6. Keep `count_no_position` on by default, and review it against real traffic during acceptance.
+6a. Count live bridged data as a show.
+7. Remove airplanes.live from the provider list until its operator approves access.
+8. Add an optional ground-traffic filter (`ignore_ground`, `ground_speed_limit_kt`), off by default. It requires a `ground` report, with a speed below the limit or no speed, and uses no numeric altitude, airport elevation or aircraft type. Helicopters below the limit are counted unless they report `ground`.
+
+### Known risks to review during acceptance
+
+- **Airport inside the radius:** with the default floor of 0, ground traffic counts. In one live sample around Heathrow, 28 of 42 aircraft were on the ground, so a nearby airport could keep the heads dark for the whole show. `ignore_ground` is the control for this, and raising `alt_floor_ft` also excludes `ground` aircraft.
+- **False `ground` reports with `ignore_ground` on:** see the limits under Ignoring ground traffic.
+- **Far-away aircraft with no position:** see `count_no_position` above.
+- **Unprotected cases:** Channel Tester and the crash-during-CLEAR gap.
 
 ## Acceptance tests
 
@@ -442,10 +603,15 @@ Phase 1 is done when every test below passes on a Pi 4 running FPP 9.5 and on cu
 - [ ] Aircraft enters radius within altitude band → dimmer/shutter forced to off values on the next poll; pan/tilt/color keep following the sequence
 - [ ] Aircraft above ceiling or below floor → no blackout
 - [ ] Aircraft reporting "ground" inside radius with floor 0 → blackout
+- [ ] `ignore_ground` on: aircraft reporting "ground" below `ground_speed_limit_kt` inside radius → no blackout; shown as `ground (ignored)` in status and logged
+- [ ] `ignore_ground` on: aircraft reporting "ground" reaches `ground_speed_limit_kt` on its takeoff roll → blackout on that poll
+- [ ] `ignore_ground` on: slow aircraft reporting a numeric altitude, such as a hovering helicopter → blackout
+- [ ] `ignore_ground` on: aircraft or surface vehicle reporting "ground" with no speed → no blackout; shown as `ground (ignored)`
+- [ ] `ignore_ground` on: helicopter below `ground_speed_limit_kt` with no "ground" report → blackout; the same helicopter reporting "ground" → no blackout
 - [ ] Aircraft with altitude but no position: blackout when `count_no_position` on; logged only when off
 - [ ] Zone clears → channels released after `release_delay_s`; 0 releases immediately
 - [ ] Two fixtures in different universes, one in the same universe as a non-head prop → only the listed channels change
-- [ ] Receiver stops → after 2 failed 10 s checks, online feed takes over and banner warning shows; receiver returns → switches back and warning clears
+- [ ] Receiver stops → after 2 failed 10 s checks, online feed takes over and the warning shows; receiver returns → switches back and warning clears
 - [ ] Feed silent longer than `max_data_age_s` → blackout with reason `no_data`; recovers when data returns
 - [ ] Both feeds down → blackout held, both-down warning shown
 - [ ] Outside schedule → IDLE, nothing overridden; schedule starts with an aircraft present → blackout on first poll
@@ -453,6 +619,12 @@ Phase 1 is done when every test below passes on a Pi 4 running FPP 9.5 and on cu
 - [ ] Enable, Disable and Test Trigger commands work from a playlist and from the Command API
 - [ ] Status endpoint returns all documented fields
 - [ ] fppd restart mid-blackout → daemon restarts and re-evaluates; no stuck overlays after uninstall
+- [ ] Daemon killed mid-blackout → heads stay dark; supervisor restarts it; it resumes with reason `resume` and releases only once the normal rules are met
+- [ ] Daemon killed mid-blackout with a fixture removed while it is down → that fixture's channel is still released
+- [ ] On FPP 9.5 and 10.2, release after an fppd restart never produces a full-on channel
+- [ ] Online feed outside the show window polls about every 30 s, inside it at the normal rate, with an immediate poll at show start; no online requests while disabled; receiver polling stays fast throughout
+- [ ] A USB DMX head using `start_channel` blacks out correctly
+- [ ] Header indicator appears on a warning and when the daemon is stopped, and clears afterwards
 - [ ] Install and uninstall each run twice cleanly; only one log file exists
 - [ ] fpp-data plugin check: no Blocker or Best-practice findings
 
@@ -465,6 +637,7 @@ Phase 1 is done when every test below passes on a Pi 4 running FPP 9.5 and on cu
 - [ ] Status map refreshes every 5 s; with internet blocked, the radar plot appears instead
 - [ ] Aircraft list opens full screen and returns with the back button
 - [ ] Disabling from the status page asks for confirmation
+- [ ] The ground switch is on Location & Zone and the ground speed limit is under Advanced; ignored aircraft show as `ground (ignored)` on the map, radar plot and aircraft list
 
 ## Deferred features
 
@@ -482,3 +655,6 @@ These are out of scope for phase 1; the backend above leaves hooks for each.
 - [PLUGIN_GUIDELINES.md](https://github.com/FalconChristmas/fpp-plugin-Template/blob/master/PLUGIN_GUIDELINES.md)
 - [fpp-data](https://github.com/FalconChristmas/fpp-data)
 - [PLUGINS.md](https://github.com/FalconChristmas/fpp-data/blob/master/PLUGINS.md)
+- [FPP source](https://github.com/FalconChristmas/fpp)
+- [adsb.lol API](https://github.com/adsblol/api), [adsb.fi open data](https://github.com/adsbfi/opendata)
+- [readsb JSON](https://github.com/wiedehopf/readsb/blob/dev/README-json.md), [dump1090-fa JSON](https://github.com/flightaware/dump1090/blob/master/README-json.md), [dump978 writer](https://github.com/flightaware/dump978/blob/master/skyaware_writer.cc)

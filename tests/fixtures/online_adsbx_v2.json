@@ -1,0 +1,11 @@
+{
+  "ac": [
+    {"hex": "d00001", "type": "adsb_icao", "flight": "TEST505 ", "r": "N00000", "t": "B738", "alt_baro": 3500, "alt_geom": 3600, "gs": 180.2, "track": 123.4, "lat": 40.0100, "lon": -75.0100, "seen_pos": 0.3, "seen": 0.1, "dst": 0.8, "dir": 225.0},
+    {"hex": "d00002", "type": "adsb_icao", "r": "N00001", "alt_baro": "ground", "gs": 0.0, "lat": 40.0010, "lon": -75.0010, "seen_pos": 2.0, "seen": 1.0, "dst": 0.1, "dir": 180.0}
+  ],
+  "msg": "No error",
+  "now": 1793900934000,
+  "total": 2,
+  "ctime": 1793900934000,
+  "ptime": 3
+}

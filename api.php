@@ -1,46 +1,142 @@
 <?php
-/*
-A way for plugins to provide their own PHP API endpoints.
+// SkyGuard's API routes. FPP loads this file on every /api request, so it only
+// declares functions, every name is prefixed, and nothing runs at load time.
 
-To use, create a file called api.php file in the plugin's directory
-and provide a getEndpointsPLUGINNAME() function which returns an
-array describing the endpoints the plugin implements.  Since PHP
-does not allow hyphens in function names, any hyphens in the plugin
-name must be removed when substituting for PLUGINNAME above and if
-the plugin name is used in any callback function names.  It is
-also best to use unique endpoint names as shown below to eliminate
-any conflicts with stock FPP code or other plugin API callbacks.
-
-All endpoints are prefixed with /api/plugin/PLUGIN-NAME but only
-the part after PLUGIN-NAME is specified in the getEndpointsPLUGINNAME()
-data.  The plugin name is used as-is in the endpoint URL, hyphens
-are not removed.  -- limonade.php is used for the underlying implementation so
-param("param1" ) can be used for an api like /api/plugin/fpp-BigButtons/:param1
-
-Here is a simple example which would add a
-/api/plugin/fpp-BigButtons/version endpoint to the fpp-Bigbuttons plugin.
-*/
-
-
-function getEndpointsfpppluginTemplate() {
-    $result = array();
-
-    $ep = array(
-        'method' => 'GET',
-        'endpoint' => 'version',
-        'callback' => 'fpppluginTemplateVersion');
-
-    array_push($result, $ep);
-
-    return $result;
+function getEndpointsfpppluginSkyGuard() {
+    return array(
+        array('method' => 'GET', 'endpoint' => 'status', 'callback' => 'fppPluginSkyGuardStatus'),
+        array('method' => 'GET', 'endpoint' => 'headerIndicator', 'callback' => 'fppPluginSkyGuardHeaderIndicator'),
+        array('method' => 'GET', 'endpoint' => 'geocode', 'callback' => 'fppPluginSkyGuardGeocode'),
+    );
 }
 
-// GET /api/plugin/fpp-plugin-Template/version
-function fpppluginTemplateVersion() {
-    $result = array();
-    $result['version'] = 'fpp-plugin-Template v1.2.3';
-
-    return json($result);
+function fppPluginSkyGuardDataDir() {
+    global $settings;
+    return $settings['mediaDirectory'] . '/plugindata/fpp-plugin-SkyGuard';
 }
 
-?>
+// The daemon's status file, or null if there isn't a readable one.
+function fppPluginSkyGuardReadStatus() {
+    $path = fppPluginSkyGuardDataDir() . '/status.json';
+    if (!is_readable($path)) {
+        return null;
+    }
+    $doc = json_decode(file_get_contents($path), true);
+    return is_array($doc) ? $doc : null;
+}
+
+// The daemon writes at least every 5 s, so much older than that means it isn't running.
+function fppPluginSkyGuardIsRunning($doc) {
+    if ($doc === null || !isset($doc['updated_at'])) {
+        return false;
+    }
+    return abs(time() - floatval($doc['updated_at'])) <= 30;
+}
+
+// GET /api/plugin/fpp-plugin-SkyGuard/status
+function fppPluginSkyGuardStatus() {
+    $doc = fppPluginSkyGuardReadStatus();
+    if ($doc === null) {
+        return json(array('state' => null, 'running' => false));
+    }
+    $doc['running'] = fppPluginSkyGuardIsRunning($doc);
+    return json($doc);
+}
+
+// GET /api/plugin/fpp-plugin-SkyGuard/headerIndicator
+// FPP calls this with a 1 s timeout on its status updates, so it only reads the status file.
+function fppPluginSkyGuardHeaderIndicator() {
+    $doc = fppPluginSkyGuardReadStatus();
+    $running = fppPluginSkyGuardIsRunning($doc);
+    $warnings = ($running && isset($doc['warnings']) && is_array($doc['warnings'])) ? $doc['warnings'] : array();
+
+    if (!$running) {
+        $tooltip = 'SkyGuard is not running, so the heads are not protected.';
+        $color = 'var(--bs-danger)';
+    } else {
+        $tooltip = implode(' ', $warnings);
+        $color = 'var(--bs-warning)';
+    }
+
+    return json(array(
+        'visible' => (!$running || count($warnings) > 0),
+        'pluginName' => 'fpp-plugin-SkyGuard',
+        'icon' => 'fa-plane',
+        'color' => $color,
+        // FPP places this inside an HTML attribute, and warnings can hold fixture names.
+        'tooltip' => htmlspecialchars($tooltip, ENT_QUOTES),
+        'link' => 'plugin.php?plugin=fpp-plugin-SkyGuard&page=status.php',
+    ));
+}
+
+function fppPluginSkyGuardError($code, $message) {
+    http_response_code($code);
+    return json(array('status' => 'ERROR', 'message' => $message));
+}
+
+// GET /api/plugin/fpp-plugin-SkyGuard/geocode?q=<address>
+// Nominatim's usage policy allows at most 1 request a second and asks that repeated
+// queries be avoided, hence the throttle and the one-entry cache. The address isn't logged.
+function fppPluginSkyGuardGeocode() {
+    if (ReadSettingFromFile('geocoder', 'fpp-plugin-SkyGuard') === 'off') {
+        return fppPluginSkyGuardError(403, 'Address lookup is switched off.');
+    }
+    $query = isset($_GET['q']) ? trim(strval($_GET['q'])) : '';
+    if (strlen($query) < 3 || strlen($query) > 200) {
+        return fppPluginSkyGuardError(400, 'Enter an address.');
+    }
+
+    $dir = fppPluginSkyGuardDataDir();
+    $cachePath = $dir . '/geocode_cache.json';
+    $key = hash('sha256', $query);
+    if (is_readable($cachePath)) {
+        $cached = json_decode(file_get_contents($cachePath), true);
+        if (is_array($cached) && isset($cached['key'], $cached['results']) && $cached['key'] === $key) {
+            return json(array('status' => 'OK', 'results' => $cached['results'], 'attribution' => 'Data © OpenStreetMap contributors'));
+        }
+    }
+    if (is_readable($cachePath) && time() - filemtime($cachePath) < 1) {
+        return fppPluginSkyGuardError(429, 'Please wait a moment and try again.');
+    }
+
+    $url = 'https://nominatim.openstreetmap.org/search?' . http_build_query(array(
+        'q' => $query,
+        'format' => 'jsonv2',
+        'limit' => 5,
+    ));
+    $curl = curl_init($url);
+    curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+    curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 4);
+    curl_setopt($curl, CURLOPT_TIMEOUT, 8);
+    curl_setopt($curl, CURLOPT_USERAGENT, 'fpp-plugin-SkyGuard (https://github.com/mvgoodwin78/fpp-plugin-SkyGuard)');
+    $body = curl_exec($curl);
+    $errorNumber = curl_errno($curl);
+    $status = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+    curl_close($curl);
+
+    if ($errorNumber === 60) {
+        return fppPluginSkyGuardError(502, 'Certificate check failed. Check this device\'s date and time.');
+    }
+    if ($body === false || $status !== 200) {
+        return fppPluginSkyGuardError(502, 'Could not reach the address lookup service.');
+    }
+    $places = json_decode($body, true);
+    if (!is_array($places)) {
+        return fppPluginSkyGuardError(502, 'The address lookup service sent an unreadable answer.');
+    }
+
+    $results = array();
+    foreach ($places as $place) {
+        if (is_array($place) && isset($place['lat'], $place['lon'])) {
+            $results[] = array(
+                'lat' => floatval($place['lat']),
+                'lon' => floatval($place['lon']),
+                'name' => isset($place['display_name']) ? strval($place['display_name']) : '',
+            );
+        }
+    }
+    if (is_writable($dir)) {
+        file_put_contents($cachePath, json_encode(array('key' => $key, 'results' => $results)), LOCK_EX);
+    }
+    return json(array('status' => 'OK', 'results' => $results, 'attribution' => 'Data © OpenStreetMap contributors'));
+}

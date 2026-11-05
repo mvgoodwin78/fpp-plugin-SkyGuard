@@ -1,40 +1,34 @@
-# fpp-plugin-Template
-Template plugin for FPP Plugin developers
+# SkyGuard
 
-Ships with `LICENSE` defaulted to GPLv2 (the convention most FPP plugins use).
-Replace it with a license of your own choosing if you'd prefer — just keep
-*some* `LICENSE`/`COPYING` file in the repo root for redistribution clarity.
+An FPP plugin that blacks out moving-head light output whenever an aircraft is inside a radius you set, so beams aren't pointed at aircraft. Only each head's dimmer and shutter channels are forced to off values; pan, tilt, color and every other channel keep following the sequence.
 
-## Building a plugin
+**Status: in development.** The backend is built and its settings pages aren't. It has been tested against FPP's API on one FPP 10.3 box, but not yet with real moving heads. Don't rely on it at a show yet.
 
-- [`PLUGIN_GUIDELINES.md`](PLUGIN_GUIDELINES.md) - rules and conventions for a
-  well-behaved plugin, including §14 on privacy and personal data (what must
-  be disclosed, and how FPP colours the install dialog from your `privacy`
-  block). Read this (or point your AI assistant at it) before you
-  start, and again whenever you add a feature.
-- [`PLUGININFO_FORMAT.md`](PLUGININFO_FORMAT.md) - the `pluginInfo.json`
-  metadata format reference, including the `privacy` block.
+## How it works
 
-Two browser tools on fpp-data's site help with `pluginInfo.json` (nothing
-leaves your browser except reads of your own public repo):
+- **Aircraft data** comes from a local ADS-B receiver, an online provider (adsb.lol or adsb.fi), or the receiver with online as a fallback.
+- **During a show**, any qualifying aircraft inside the radius and altitude band blacks out the heads on that poll. They're released once the zone has been empty for the release delay.
+- **It fails dark.** If aircraft data stops, or SkyGuard hits an unexpected error during a show, the heads black out. If the program itself crashes during a blackout, they stay dark until it restarts.
+- **It doesn't replace your own judgment or any legal duty.** Coverage depends on what aircraft broadcast and on your data source, and not every aircraft can be seen.
 
-- [**Privacy disclosure builder**](https://falconchristmas.github.io/fpp-data/plugin_privacy_builder/) -
-  writes the `privacy` block for you, one key at a time, with the same rules
-  the listing check applies. Pre-fills from your repo
-  (`?repo=owner/repo`) or from pasted JSON, and edits a block you already have.
-- [**Plugin preview**](https://falconchristmas.github.io/fpp-data/plugin_preview/) -
-  renders your `pluginInfo.json` as FPP's Plugin Manager will show it (card,
-  six privacy dots, install dialog) using FPP's own renderer. Check it before
-  you submit, and again whenever you change the block.
+## What it sends, and to whom
 
-**These two files document how to build a plugin in general - they aren't part
-of your plugin.** Once you've forked this template, delete
-`PLUGIN_GUIDELINES.md` and `PLUGININFO_FORMAT.md` from your own repo; they
-should only ever live here, in fpp-plugin-Template.
+- **Online flight data:** your show's location and search radius go to the provider you choose.
+- **Address lookup:** a typed address goes to OpenStreetMap's Nominatim, only when you press Look up.
+- **Local receiver:** requests go to the address you enter.
 
-## Getting your plugin listed
+There's no telemetry. Your location and any API key are stored in `plugindata/fpp-plugin-SkyGuard/private.json`. Anyone who can reach FPP can read the plugin's status, which includes your location.
 
-Once it's built, submit it via
-[fpp-data](https://github.com/FalconChristmas/fpp-data) - see that repo's
-`README.md` for the submission form and `PLUGINS.md` for the rules.
+## Development
 
+Run the tests with:
+
+```
+python -m unittest discover -s tests -t .
+```
+
+`SKYGUARD_SPEC.md` is the build spec and records what has been verified. Tests need only the Python standard library.
+
+## License
+
+GPLv2. See `LICENSE`.

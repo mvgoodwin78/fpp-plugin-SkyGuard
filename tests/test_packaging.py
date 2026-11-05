@@ -1,0 +1,517 @@
+"""The plugin as FPP sees it: metadata, scripts and the full lifecycle on Linux."""
+
+import json
+import os
+import re
+import shutil
+import stat
+import subprocess
+import sys
+import tempfile
+import time
+import unittest
+
+from skyguard.config import Paths
+from skyguard.feeds.online_adsbx_v2 import PROVIDERS
+from skyguard.fpp_api import FppApi
+from skyguard.overlay import Ledger, OverlayController
+from skyguard.notifier import Notifier
+from skyguard.release import release_everything
+from tests.fake_fpp_server import FakeFpp
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+REPO = "fpp-plugin-SkyGuard"
+HOOKS = ("fpp_install.sh", "fpp_uninstall.sh", "postStart.sh", "preStop.sh")
+SHELL_SCRIPTS = ("callbacks", *(f"scripts/{n}" for n in (*HOOKS, "skyguard_start.sh")))
+COMMAND_SCRIPTS = ("skyguard_enable.py", "skyguard_disable.py", "skyguard_test.py")
+EXECUTABLE = (*SHELL_SCRIPTS, *(f"commands/{n}" for n in COMMAND_SCRIPTS))
+
+
+def read(relpath):
+    with open(os.path.join(ROOT, relpath), encoding="utf-8", newline="") as handle:
+        return handle.read()
+
+
+def load(relpath):
+    return json.loads(read(relpath))
+
+
+class PluginInfoTests(unittest.TestCase):
+    def setUp(self):
+        self.info = load("pluginInfo.json")
+        self.privacy = self.info["privacy"]
+
+    def test_required_fields(self):
+        for field in ("repoName", "name", "author", "description", "homeURL", "srcURL", "bugURL", "versions"):
+            self.assertTrue(self.info.get(field), field)
+        self.assertEqual(self.info["repoName"], REPO)
+        self.assertTrue(self.info["srcURL"].endswith(f"{REPO}.git"))
+
+    def test_nothing_left_from_the_template(self):
+        text = read("pluginInfo.json")
+        for leftover in ("TEMPLATE", "Template", "John Doe", "CoolPlugin", "FalconChristmas"):
+            self.assertNotIn(leftover, text)
+
+    def test_versions_start_at_9_5_on_the_exact_platform_names(self):
+        versions = self.info["versions"]
+        self.assertEqual(versions[0]["minFPPVersion"], "9.5")
+        for version in versions:
+            self.assertEqual(version["platforms"], ["Raspberry Pi", "BeagleBone Black", "BeagleBone 64"])
+            self.assertEqual(version["branch"], "master")
+
+    def test_privacy_has_exactly_the_eight_keys(self):
+        self.assertEqual(
+            set(self.privacy),
+            {"summary", "sends", "collects", "sensors", "remoteAccess", "systemChanges", "closedCode", "other"},
+        )
+
+    def test_privacy_text_is_within_the_limits(self):
+        self.assertLessEqual(len(self.privacy["summary"]), 200)
+        for send in self.privacy["sends"]:
+            self.assertLessEqual(len(send["what"]), 100)
+            self.assertLessEqual(len(send["why"]), 100)
+            self.assertEqual(send["why"], send["why"].rstrip("."), "FPP adds its own full stop")
+            self.assertEqual(send["why"][0], send["why"][0].lower())
+        for item in self.privacy["collects"]:
+            self.assertLessEqual(len(item["what"]), 100)
+
+    def test_every_host_in_the_code_is_disclosed_in_both_places(self):
+        hosts = {re.match(r"https://([^/]+)/", p.url_template).group(1) for p in PROVIDERS.values()}
+        hosts.add("nominatim.openstreetmap.org")
+        declared = {send["to"] for send in self.privacy["sends"]}
+        for host in hosts:
+            self.assertIn(host, declared)
+            self.assertIn(host, self.info["description"])
+
+    def test_nothing_is_marked_as_sending_on_its_own(self):
+        self.assertFalse(any(send["alwaysOn"] for send in self.privacy["sends"]))
+
+    def test_the_location_is_disclosed_as_kept(self):
+        self.assertIn("private.json", self.privacy["collects"][0]["where"])
+
+    def test_routes_that_act_are_named_in_other(self):
+        for word in ("Enable", "Disable", "Test Trigger", "location"):
+            self.assertIn(word, self.privacy["other"])
+
+    def test_no_api_key_is_ever_placed_in_the_config_folder(self):
+        self.assertNotIn("config/", self.privacy["collects"][0]["where"])
+
+
+class CommandTests(unittest.TestCase):
+    def test_descriptions_name_scripts_that_exist(self):
+        commands = load("commands/descriptions.json")
+        self.assertEqual(
+            [c["name"] for c in commands],
+            ["SkyGuard Enable", "SkyGuard Disable", "SkyGuard Test Trigger"],
+        )
+        for command in commands:
+            self.assertTrue(os.path.exists(os.path.join(ROOT, "commands", command["script"])))
+
+    def test_only_the_test_trigger_takes_an_argument(self):
+        commands = {c["name"]: c for c in load("commands/descriptions.json")}
+        self.assertEqual(commands["SkyGuard Enable"]["args"], [])
+        self.assertEqual(commands["SkyGuard Disable"]["args"], [])
+        argument = commands["SkyGuard Test Trigger"]["args"][0]
+        self.assertEqual((argument["min"], argument["max"], argument["default"]), (1, 3600, "10"))
+
+    def test_scripts_use_an_absolute_python_path(self):
+        # FPP runs them with no PATH in the environment.
+        for name in COMMAND_SCRIPTS:
+            self.assertTrue(read(f"commands/{name}").startswith("#!/usr/bin/python3\n"), name)
+
+    def run_script(self, name, *args):
+        media = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, media, ignore_errors=True)
+        # Exactly the environment FPP gives a command script, plus what Windows needs to start.
+        env = {"MEDIADIR": media, "FPPDIR": "/opt/fpp", "SCRIPTDIR": os.path.join(ROOT, "commands")}
+        for key in ("SYSTEMROOT", "PATH"):
+            if key in os.environ:
+                env[key] = os.environ[key]
+        env["PYTHONDONTWRITEBYTECODE"] = "1"
+        started = time.monotonic()
+        subprocess.run(
+            [sys.executable, os.path.join(ROOT, "commands", name), *args],
+            env=env, cwd=tempfile.gettempdir(), check=True, timeout=20, capture_output=True,
+        )
+        self.assertLess(time.monotonic() - started, 10)
+        spool = Paths.from_env({"MEDIADIR": media}).commands_dir
+        files = os.listdir(spool)
+        self.assertEqual(len(files), 1)
+        with open(os.path.join(spool, files[0]), encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def test_enable_script(self):
+        self.assertEqual(self.run_script("skyguard_enable.py")["command"], "enable")
+
+    def test_disable_script(self):
+        self.assertEqual(self.run_script("skyguard_disable.py")["command"], "disable")
+
+    def test_test_script_passes_the_seconds(self):
+        doc = self.run_script("skyguard_test.py", "25")
+        self.assertEqual((doc["command"], doc["seconds"]), ("test", "25"))
+
+    def test_test_script_without_seconds_uses_the_default_later(self):
+        self.assertNotIn("seconds", self.run_script("skyguard_test.py"))
+
+
+class ScriptFileTests(unittest.TestCase):
+    def test_scripts_have_unix_line_endings(self):
+        for name in (*SHELL_SCRIPTS, *(f"commands/{n}" for n in COMMAND_SCRIPTS)):
+            self.assertNotIn("\r", read(name), name)
+
+    def test_scripts_have_a_shebang(self):
+        for name in SHELL_SCRIPTS:
+            self.assertTrue(read(name).startswith("#!/bin/bash\n"), name)
+
+    def test_no_forbidden_commands(self):
+        for name in SHELL_SCRIPTS:
+            text = "\n".join(l for l in read(name).splitlines() if not l.lstrip().startswith("#"))
+            for word in (r"\bsudo\b", r"\breboot\b", r"curl .*\|", r"32322", r"systemctl", r"fppd restart"):
+                self.assertIsNone(re.search(word, text), f"{name}: {word}")
+
+    def test_install_stops_on_failure_from_the_first_command(self):
+        lines = [l for l in read("scripts/fpp_install.sh").splitlines() if l.strip() and not l.startswith("#")]
+        self.assertEqual(lines[0], "set -e")
+
+    def test_uninstall_stops_the_daemon_before_releasing(self):
+        # Otherwise the daemon could set a range again after the release.
+        script = read("scripts/fpp_uninstall.sh")
+        self.assertLess(script.index("skyguard.supervisor stop"), script.index("skyguard.release"))
+
+    def test_the_daemon_is_started_in_the_background_with_nothing_attached(self):
+        # fppd waits on these scripts, and on anything that holds their output open.
+        self.assertIn("</dev/null >/dev/null 2>&1 &", read("scripts/skyguard_start.sh"))
+
+    def test_the_template_scripts_are_gone(self):
+        for name in ("commands/on.sh", "scripts/preStart.sh", "scripts/fpp_update_check.sh", "output.php"):
+            self.assertFalse(os.path.exists(os.path.join(ROOT, name)), name)
+
+    def test_exec_bits_are_set_in_git(self):
+        # On Windows the file system can't show this, and FPP silently skips a hook without it.
+        try:
+            output = subprocess.run(
+                ["git", "ls-files", "-s", *EXECUTABLE],
+                cwd=ROOT, check=True, capture_output=True, text=True, timeout=20,
+            ).stdout
+        except (OSError, subprocess.CalledProcessError):
+            self.skipTest("not a git checkout")
+        if not output:
+            self.skipTest("not a git checkout")
+        modes = {line.split("\t")[1]: line.split()[0] for line in output.splitlines()}
+        for name in EXECUTABLE:
+            self.assertEqual(modes.get(name), "100755", name)
+
+
+class PhpTests(unittest.TestCase):
+    """Text checks only: no PHP is available here, so these don't prove it parses."""
+
+    def setUp(self):
+        self.api = read("api.php")
+
+    def test_the_registrar_uses_the_name_fpp_looks_for(self):
+        self.assertIn("function getEndpointsfpppluginSkyGuard()", self.api)
+
+    def test_every_function_name_is_prefixed(self):
+        for name in re.findall(r"^function (\w+)", self.api, re.MULTILINE):
+            self.assertTrue(name.startswith(("fppPluginSkyGuard", "getEndpointsfpppluginSkyGuard")), name)
+
+    def test_every_callback_exists(self):
+        for name in re.findall(r"'callback' => '(\w+)'", self.api):
+            self.assertIn(f"function {name}(", self.api)
+
+    def test_nothing_runs_when_the_file_loads(self):
+        depth = 0
+        outside = []
+        for line in self.api.splitlines()[1:]:
+            stripped = line.strip()
+            if depth == 0 and stripped and not stripped.startswith(("//", "function ")):
+                outside.append(stripped)
+            depth += line.count("{") - line.count("}")
+        self.assertEqual(outside, [])
+
+    def test_balanced_braces_and_parentheses(self):
+        code = re.sub(r"'(?:[^'\\]|\\.)*'", "''", self.api)
+        code = re.sub(r"//[^\n]*", "", code)
+        for opening, closing in ("{}", "()", "[]"):
+            self.assertEqual(code.count(opening), code.count(closing), opening)
+
+    def test_every_route_is_documented(self):
+        paths = load("apiDocs.json")["paths"]
+        for endpoint in re.findall(r"'endpoint' => '(\w+)'", self.api):
+            self.assertIn(f"/api/plugin/{REPO}/{endpoint}", paths)
+
+    def test_the_tooltip_is_escaped_for_the_attribute_fpp_puts_it_in(self):
+        self.assertIn("htmlspecialchars($tooltip, ENT_QUOTES)", self.api)
+
+    def test_the_lookup_has_time_limits_and_identifies_itself(self):
+        for option in ("CURLOPT_CONNECTTIMEOUT", "CURLOPT_TIMEOUT", "CURLOPT_USERAGENT"):
+            self.assertIn(option, self.api)
+
+    def test_the_address_is_never_logged(self):
+        self.assertNotIn("error_log", self.api)
+        self.assertNotIn("file_put_contents($logFile", self.api)
+
+    def test_status_never_touches_the_private_file(self):
+        self.assertNotIn("private.json", self.api)
+
+    def test_menu_has_at_most_one_entry_per_type(self):
+        types = re.findall(r"'type' => '(\w+)'", read("menu.inc"))
+        self.assertEqual(sorted(types), ["content", "help", "status"])
+
+
+class ReleaseTests(unittest.TestCase):
+    def setUp(self):
+        self.media = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.media, ignore_errors=True)
+        self.paths = Paths.from_env({"MEDIADIR": self.media})
+        os.makedirs(self.paths.data_dir)
+        self.fpp = FakeFpp()
+        self.addCleanup(self.fpp.stop)
+        self.api = FppApi(self.fpp.url, timeout_s=1.0)
+
+    def hold(self):
+        ledger = Ledger(self.paths.ledger_file)
+        OverlayController(self.api, ledger, Notifier(), time.monotonic).sync({10: 0, 11: 8})
+
+    def test_releases_what_the_ledger_holds(self):
+        self.hold()
+        self.assertTrue(release_everything(self.paths, self.api))
+        self.assertEqual(self.fpp.ranges, {})
+        self.assertEqual(self.fpp.ever_full_on, [])
+
+    def test_never_goes_full_on_if_fppd_restarted(self):
+        self.hold()
+        self.fpp.restart_fppd()
+        self.assertTrue(release_everything(self.paths, self.api))
+        self.assertEqual(self.fpp.ever_full_on, [])
+
+    def test_running_twice_or_with_nothing_held_is_safe(self):
+        self.assertTrue(release_everything(self.paths, self.api))
+        self.hold()
+        self.assertTrue(release_everything(self.paths, self.api))
+        self.assertTrue(release_everything(self.paths, self.api))
+        self.assertEqual(self.fpp.ever_full_on, [])
+
+    def test_reports_failure_if_fpp_is_away(self):
+        self.hold()
+        self.fpp.available = False
+        with self.assertLogs("skyguard", level="WARNING"):
+            self.assertFalse(release_everything(self.paths, self.api))
+
+    def test_clears_a_message_left_on_a_panel(self):
+        self.fpp.add_model("Panel", state=1)
+        self.fpp.models["Panel"]["effect"] = "text"
+        ledger = Ledger(self.paths.ledger_file)
+        ledger.matrix["Panel"] = 0
+        ledger.save()
+        self.assertTrue(release_everything(self.paths, self.api))
+        self.assertIsNone(self.fpp.models["Panel"]["effect"])
+        self.assertEqual(self.fpp.models["Panel"]["state"], 0)
+
+
+@unittest.skipIf(os.name == "nt" or shutil.which("bash") is None, "needs Linux to run the real scripts")
+class LifecycleTests(unittest.TestCase):
+    """The real scripts, in a copied plugin folder, with a fake FPP install around them."""
+
+    def setUp(self):
+        self.base = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.base, ignore_errors=True)
+        self.fppdir = os.path.join(self.base, "fpp")
+        self.media = os.path.join(self.base, "media")
+        self.plugin = os.path.join(self.media, "plugins", REPO)
+        os.makedirs(os.path.join(self.fppdir, "scripts"))
+        os.makedirs(os.path.join(self.fppdir, "src"))
+        os.makedirs(os.path.join(self.media, "config"))
+        os.makedirs(os.path.join(self.media, "logs"))
+        os.makedirs(self.plugin)
+        for name in ("skyguard", "commands", "scripts"):
+            shutil.copytree(os.path.join(ROOT, name), os.path.join(self.plugin, name))
+        shutil.copy(os.path.join(ROOT, "callbacks"), self.plugin)
+        for name in EXECUTABLE:
+            path = os.path.join(self.plugin, name)
+            os.chmod(path, os.stat(path).st_mode | stat.S_IXUSR)
+        self.flag_file = os.path.join(self.base, "restartFlag")
+        with open(os.path.join(self.fppdir, "scripts", "common"), "w", encoding="utf-8") as handle:
+            handle.write(
+                f'MEDIADIR="{self.media}"\nLOGDIR="{self.media}/logs"\nFPPBINDIR="{self.fppdir}/src"\n'
+                f'setSetting() {{ echo "$1=$2" >> "{self.flag_file}"; }}\n'
+            )
+        self.set_fpp_version("10.3")
+        self.paths = Paths.from_env({"MEDIADIR": self.media})
+        self.addCleanup(self.run_hook, "scripts/preStop.sh")
+
+    def set_fpp_version(self, version):
+        path = os.path.join(self.fppdir, "src", "fpp")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(f'#!/bin/bash\necho "FPP Version: {version}"\n')
+        os.chmod(path, 0o755)
+
+    def run_hook(self, name, *args, **env):
+        return subprocess.run(
+            [os.path.join(self.plugin, name), *args],
+            env={**os.environ, "FPPDIR": self.fppdir, "PYTHONDONTWRITEBYTECODE": "1", **env},
+            capture_output=True, text=True, timeout=20,
+        )
+
+    def wait_for(self, condition, timeout_s=10.0):
+        deadline = time.monotonic() + timeout_s
+        while time.monotonic() < deadline:
+            if condition():
+                return True
+            time.sleep(0.05)
+        return condition()
+
+    def supervisor_running(self):
+        return os.path.exists(self.paths.supervisor_pid_file)
+
+    def supervisors(self):
+        marker = "skyguard.supervisor"
+        count = 0
+        for entry in os.listdir("/proc"):
+            if not entry.isdigit():
+                continue
+            try:
+                with open(f"/proc/{entry}/cmdline", "rb") as handle:
+                    cmdline = handle.read()
+                with open(f"/proc/{entry}/environ", "rb") as handle:
+                    environ = handle.read()
+            except OSError:
+                continue
+            if marker.encode() in cmdline and self.media.encode() in environ:
+                count += 1
+        return count
+
+    def test_install_creates_a_private_folder_and_is_safe_twice(self):
+        for _ in range(2):
+            result = self.run_hook("scripts/fpp_install.sh")
+            self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(os.path.isdir(self.paths.commands_dir))
+        self.assertEqual(stat.S_IMODE(os.stat(self.paths.private_file).st_mode), 0o600)
+
+    def test_install_tightens_a_private_file_that_is_too_open(self):
+        self.run_hook("scripts/fpp_install.sh")
+        os.chmod(self.paths.private_file, 0o644)
+        self.run_hook("scripts/fpp_install.sh")
+        self.assertEqual(stat.S_IMODE(os.stat(self.paths.private_file).st_mode), 0o600)
+
+    def test_install_keeps_an_existing_setup(self):
+        self.run_hook("scripts/fpp_install.sh")
+        with open(self.paths.private_file, "w", encoding="utf-8") as handle:
+            json.dump({"center_lat": 1, "center_lon": 2}, handle)
+        self.run_hook("scripts/fpp_install.sh")
+        with open(self.paths.private_file, encoding="utf-8") as handle:
+            self.assertEqual(json.load(handle)["center_lat"], 1)
+
+    def test_no_restart_is_asked_for_on_fpp_10(self):
+        self.run_hook("scripts/fpp_install.sh")
+        self.assertFalse(os.path.exists(self.flag_file))
+
+    def test_a_restart_is_asked_for_on_fpp_9(self):
+        self.set_fpp_version("9.5")
+        self.run_hook("scripts/fpp_install.sh")
+        with open(self.flag_file, encoding="utf-8") as handle:
+            self.assertIn("restartFlag=1", handle.read())
+
+    def test_a_restart_is_asked_for_if_the_version_cannot_be_read(self):
+        os.unlink(os.path.join(self.fppdir, "src", "fpp"))
+        self.assertEqual(self.run_hook("scripts/fpp_install.sh").returncode, 0)
+        self.assertTrue(os.path.exists(self.flag_file))
+
+    def test_post_start_returns_at_once_and_the_daemon_runs(self):
+        self.run_hook("scripts/fpp_install.sh")
+        started = time.monotonic()
+        self.assertEqual(self.run_hook("scripts/postStart.sh").returncode, 0)
+        self.assertLess(time.monotonic() - started, 2.0)
+        self.assertTrue(self.wait_for(self.supervisor_running))
+        self.assertTrue(self.wait_for(lambda: os.path.exists(self.paths.status_file)))
+
+    def test_starting_twice_leaves_one_supervisor(self):
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/postStart.sh")
+        self.run_hook("callbacks", "--type", "lifecycle", "startup")
+        self.run_hook("scripts/postStart.sh")
+        self.assertTrue(self.wait_for(self.supervisor_running))
+        time.sleep(1.0)
+        self.assertEqual(self.supervisors(), 1)
+
+    def test_pre_stop_ends_it_within_the_budget(self):
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/postStart.sh")
+        self.assertTrue(self.wait_for(self.supervisor_running))
+        started = time.monotonic()
+        self.assertEqual(self.run_hook("scripts/preStop.sh").returncode, 0)
+        self.assertLess(time.monotonic() - started, 4.0)
+        self.assertEqual(self.supervisors(), 0)
+
+    def test_pre_stop_with_nothing_running_is_safe(self):
+        self.assertEqual(self.run_hook("scripts/preStop.sh").returncode, 0)
+
+    def test_restart_after_stop(self):
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/postStart.sh")
+        self.assertTrue(self.wait_for(self.supervisor_running))
+        self.run_hook("scripts/preStop.sh")
+        self.run_hook("scripts/postStart.sh")
+        self.assertTrue(self.wait_for(self.supervisor_running))
+        self.assertEqual(self.supervisors(), 1)
+
+    def test_callbacks_list(self):
+        result = self.run_hook("callbacks", "--list")
+        self.assertEqual(result.stdout.strip(), "lifecycle")
+
+    def test_callbacks_ignore_other_lifecycle_events(self):
+        self.assertEqual(self.run_hook("callbacks", "--type", "lifecycle", "shutdown").returncode, 0)
+        time.sleep(0.3)
+        self.assertEqual(self.supervisors(), 0)
+
+    def test_uninstall_removes_everything_and_is_safe_twice(self):
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/postStart.sh")
+        self.assertTrue(self.wait_for(self.supervisor_running))
+        with open(self.paths.config_file, "w", encoding="utf-8") as handle:
+            handle.write('radius = "5"\n')
+        for _ in range(2):
+            self.assertEqual(self.run_hook("scripts/fpp_uninstall.sh").returncode, 0)
+        self.assertEqual(self.supervisors(), 0)
+        self.assertFalse(os.path.exists(self.paths.data_dir))
+        self.assertFalse(os.path.exists(self.paths.config_file))
+
+    def test_reinstall_keeps_the_setup(self):
+        self.run_hook("scripts/fpp_install.sh")
+        with open(self.paths.config_file, "w", encoding="utf-8") as handle:
+            handle.write('radius = "5"\n')
+        self.run_hook("scripts/fpp_uninstall.sh", FPP_PLUGIN_REINSTALL="1")
+        self.assertTrue(os.path.exists(self.paths.private_file))
+        self.assertTrue(os.path.exists(self.paths.config_file))
+
+    def test_only_an_exact_1_keeps_the_setup(self):
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/fpp_uninstall.sh", FPP_PLUGIN_REINSTALL="0")
+        self.assertFalse(os.path.exists(self.paths.data_dir))
+
+    def test_any_other_reinstall_value_is_a_real_uninstall(self):
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/fpp_uninstall.sh", FPP_PLUGIN_REINSTALL="2")
+        self.assertFalse(os.path.exists(self.paths.data_dir))
+
+    def test_only_one_log_is_created(self):
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/postStart.sh")
+        self.assertTrue(self.wait_for(self.supervisor_running))
+        self.assertTrue(self.wait_for(lambda: os.path.exists(self.paths.log_file)))
+        self.assertEqual(os.listdir(os.path.join(self.media, "logs")), [f"plugin-{REPO}.log"])
+
+    def test_uninstall_works_with_fppdir_unset(self):
+        # uninstall_plugin passes FPPDIR only as an argument, and sudo strips the exported one,
+        # so the script must fall back rather than fail. Here it falls back to /opt/fpp,
+        # which doesn't exist, and that alone must not stop the script from finishing.
+        env = {k: v for k, v in os.environ.items() if k != "FPPDIR"}
+        result = subprocess.run(
+            [os.path.join(self.plugin, "scripts/fpp_uninstall.sh")],
+            env=env, capture_output=True, text=True, timeout=20,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

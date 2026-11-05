@@ -1,0 +1,8 @@
+{
+  "now": 1793900000.25,
+  "messages": 512,
+  "aircraft": [
+    {"hex": "a00003", "type": "adsb_icao", "flight": "N978UA", "lat": 40.0150, "lon": -75.0150, "seen_pos": 1.5, "alt_baro": 4400, "alt_geom": 4400, "gs": 110.0, "track": 300.0, "messages": 12, "seen": 1.0, "rssi": -15.0},
+    {"hex": "c00001", "type": "tisb_icao", "tisb": ["lat", "lon"], "lat": 40.0400, "lon": -75.0400, "seen_pos": 4.0, "alt_baro": "ground", "messages": 5, "seen": 4.0, "rssi": -22.0}
+  ]
+}

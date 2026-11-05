@@ -1,0 +1,3 @@
+# Scripts with Windows line endings break on the Pi, whatever this machine's git settings are.
+* text=auto eol=lf
+*.png binary

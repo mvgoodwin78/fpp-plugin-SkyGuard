@@ -1,28 +1,33 @@
 #!/bin/bash
 set -e
 
-# fpp-plugin-Template install script
+# Safe to run repeatedly: Reinstall All Plugins and updates both run it again.
+: "${FPPDIR:=/opt/fpp}"
+. "${FPPDIR}/scripts/common"
 
-# Include common scripts functions and variables
-. ${FPPDIR}/scripts/common
+if ! command -v python3 >/dev/null 2>&1; then
+    echo "SkyGuard needs python3, which FPP normally includes."
+    exit 1
+fi
 
-# Add required Apache CSP (Content-Security-Policy allowed domains
-# Possible Keys are: 'default-src', 'connect-src', 'img-src', 'script-src', 'style-src', 'object-src', 'font-src'
-# (an iframe or media load is governed by 'default-src'). Every domain added here receives the
-# user's browser address on each page view, so it must be a `sends` entry in pluginInfo.json's
-# privacy block (PLUGIN_GUIDELINES.md 14.1)
-# Examples:
-# ${FPPDIR}/scripts/ManageApacheContentPolicy.sh add connect-src https://domaintotrust.co.uk
-# ${FPPDIR}/scripts/ManageApacheContentPolicy.sh add img-src https://anotherdomain.com
+DATA_DIR="${MEDIADIR}/plugindata/fpp-plugin-SkyGuard"
+PRIVATE_FILE="${DATA_DIR}/private.json"
 
-# This template ships commands/descriptions.json, which fppd only reads once,
-# at its own startup (PluginManager::loadUserPlugins(), src/Plugins.cpp) - not
-# on every plugin install/update. Until fppd restarts, a freshly-installed (or
-# changed) command type stays invisible to playlists/schedules/events even
-# though the rest of the plugin (api.php, content.php) is already live. Set
-# the restart flag so the Plugin Manager's "Restart Required" banner appears
-# right after install instead of leaving the command silently unavailable.
-# Remove this if your plugin doesn't ship commands/descriptions.json or a
-# native (Makefile-built) plugin - not every plugin needs it.
-setSetting restartFlag 1
+mkdir -p "${DATA_DIR}/commands"
 
+# The API key and home coordinates live here, readable only by FPP's user and root.
+if [ ! -e "${PRIVATE_FILE}" ]; then
+    (umask 077; echo '{}' > "${PRIVATE_FILE}")
+fi
+chmod 600 "${PRIVATE_FILE}"
+
+# The web pages run as fpp and the daemon as root, and both use this folder.
+chown -R fpp:fpp "${DATA_DIR}" 2>/dev/null || true
+
+# FPP 10 and later register commands live, through the callbacks script. Earlier versions
+# read them only when fppd starts, so they need a restart. If the version can't be read,
+# ask for the restart: an extra restart is harmless, and missing commands aren't.
+FPP_MAJOR="$("${FPPBINDIR:-${FPPDIR}/src}/fpp" -V 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -n 1 | cut -d. -f1 || true)"
+if [ -z "${FPP_MAJOR}" ] || [ "${FPP_MAJOR}" -lt 10 ]; then
+    setSetting restartFlag 1
+fi

@@ -1,0 +1,13 @@
+{
+  "now": 1793900000.1,
+  "messages": 123456,
+  "aircraft": [
+    {"hex": "A00001", "type": "adsb_icao", "flight": "TEST101 ", "alt_baro": 3200, "alt_geom": 3350, "gs": 142.5, "track": 270.1, "lat": 40.0100, "lon": -75.0100, "seen_pos": 0.4, "seen": 0.2},
+    {"hex": "a00002", "type": "adsb_icao", "flight": "TEST202 ", "alt_baro": "ground", "gs": 12.0, "track": 90.0, "lat": 40.0020, "lon": -75.0020, "seen_pos": 1.1, "seen": 0.9},
+    {"hex": "a00003", "type": "mode_s", "alt_baro": 4500, "seen": 2.0},
+    {"hex": "a00004", "type": "adsb_icao", "flight": "TEST404 ", "alt_baro": 3000, "gs": 150.0, "track": 10.0, "seen": 70.0, "lastPosition": {"lat": 40.0200, "lon": -75.0200, "nic": 8, "rc": 186, "seen_pos": 75.0}},
+    {"hex": "~a00005", "type": "tisb_trackfile", "alt_baro": 2000, "gs": 100.0, "track": 180.0, "lat": 40.0300, "lon": -75.0300, "seen_pos": 3.0, "seen": 3.0},
+    {"hex": "a00006", "type": "mode_s", "rr_lat": 40.1, "rr_lon": -75.1, "seen": 9.0},
+    {"type": "other", "alt_baro": 1000, "lat": 40.0, "lon": -75.0}
+  ]
+}

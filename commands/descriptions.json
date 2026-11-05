@@ -1,12 +1,27 @@
 [
-{ "name": "Template Plugin On",
-  "script": "on.sh",
-  "args": [
-  ]
-},
-{ "name": "Template Plugin Off",
-  "script": "off.sh",
-  "args": [
-  ]
-}
+	{
+		"name": "SkyGuard Enable",
+		"script": "skyguard_enable.py",
+		"args": []
+	},
+	{
+		"name": "SkyGuard Disable",
+		"script": "skyguard_disable.py",
+		"args": []
+	},
+	{
+		"name": "SkyGuard Test Trigger",
+		"script": "skyguard_test.py",
+		"args": [
+			{
+				"name": "seconds",
+				"description": "Seconds",
+				"type": "int",
+				"min": 1,
+				"max": 3600,
+				"default": "10",
+				"optional": true
+			}
+		]
+	}
 ]

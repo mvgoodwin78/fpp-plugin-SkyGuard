@@ -1,0 +1,15 @@
+#!/bin/bash
+# fppd runs this, and waits for it, so it must never block. Having a callbacks script
+# at all is what lets FPP 10+ register the plugin's commands without an fppd restart.
+# The lifecycle hook starts the daemon, because postStart.sh doesn't run on a live install.
+case "$1" in
+    --list)
+        echo "lifecycle"
+        ;;
+    --type)
+        if [ "$2" = "lifecycle" ] && [ "$3" = "startup" ]; then
+            /bin/bash "$(dirname "$(readlink -f "$0")")/scripts/skyguard_start.sh"
+        fi
+        ;;
+esac
+exit 0

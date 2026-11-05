@@ -1,0 +1,33 @@
+{
+	"paths": {
+		"/api/plugin/fpp-plugin-SkyGuard/status": {
+			"get": {
+				"summary": "SkyGuard's current state, feed health, aircraft, fixtures and warnings",
+				"description": "Read-only. Includes the show's location, because the map needs it. `running` is false when the daemon hasn't updated its status recently.",
+				"responses": { "200": { "description": "Status" } }
+			}
+		},
+		"/api/plugin/fpp-plugin-SkyGuard/headerIndicator": {
+			"get": {
+				"summary": "The icon FPP shows in its page header when SkyGuard has a warning",
+				"responses": { "200": { "description": "Indicator" } }
+			}
+		},
+		"/api/plugin/fpp-plugin-SkyGuard/geocode": {
+			"get": {
+				"summary": "Look up map positions for an address",
+				"description": "Sends the address to nominatim.openstreetmap.org. Only called when the user presses Look up.",
+				"parameters": [
+					{ "name": "q", "in": "query", "required": true, "schema": { "type": "string" }, "description": "The address" }
+				],
+				"responses": {
+					"200": { "description": "Candidate positions" },
+					"400": { "description": "No usable address given" },
+					"403": { "description": "Address lookup is switched off" },
+					"429": { "description": "Asked too soon after the last lookup" },
+					"502": { "description": "The lookup service couldn't be reached" }
+				}
+			}
+		}
+	}
+}

@@ -1,0 +1,8 @@
+{
+  "now": 1793900000.5,
+  "messages": 98765,
+  "aircraft": [
+    {"hex": "b00001", "flight": "TEST303 ", "alt_baro": 8000, "alt_geom": 8150, "gs": 250.0, "track": 45.0, "lat": 40.0500, "lon": -75.0500, "seen_pos": 0.7, "messages": 44, "seen": 0.1, "rssi": -20.1},
+    {"hex": "b00002", "alt_baro": "ground", "seen": 0.5, "messages": 3, "rssi": -30.0}
+  ]
+}
