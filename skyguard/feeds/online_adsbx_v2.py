@@ -7,7 +7,7 @@ from .base import FeedError, parse_document
 from .http_client import fetch_json
 
 MAX_QUERY_RADIUS_NM = 250
-DEFAULT_PROVIDER = "adsb.lol"
+DEFAULT_PROVIDER = "adsb.fi"
 
 
 @dataclass(frozen=True)
@@ -20,8 +20,10 @@ class Provider:
 PROVIDERS = {
     provider.name: provider
     for provider in (
-        Provider("adsb.lol", "https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}", 1.0),
-        Provider("adsb.fi", "https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{nm}", 1.0),
+        # Publishes a limit of 1 request a second; every 2 s leaves a margin and was tested.
+        Provider("adsb.fi", "https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{nm}", 2.0),
+        # Limits are dynamic. It refused polling at 1 s and at 5 s, and accepted 10 s.
+        Provider("adsb.lol", "https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}", 15.0),
     )
 }
 

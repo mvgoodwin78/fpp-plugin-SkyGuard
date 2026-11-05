@@ -26,6 +26,9 @@ from .overlay import ChannelResolver, Ledger, OverlayController, blackout_target
 from .status import StatusWriter, build_status
 from .trigger import BLACKOUT, IDLE, Inputs, TriggerEngine, evaluate_zone
 
+ONLINE_LAG_NOTICE = (
+    "Online flight data can lag behind real aircraft. Increase your radius by 3 miles to allow for it."
+)
 STEP_TICK_S = 0.25
 SCHEDULE_READ_S = 1.0
 SETTING_RETRY_S = 5.0
@@ -78,6 +81,7 @@ class Daemon:
         self._pending_enabled = None
         self._last_setting_attempt = None
         self._logged_warnings = set()
+        self._lag_notice_logged = False
         self._ground_logged = set()
         self._no_position_logged = set()
         self._skipped_logged = 0
@@ -105,6 +109,12 @@ class Daemon:
 
         self.notifier.emit("plugin_enabled" if settings.enabled else "plugin_disabled")
         self.notifier.emit("center_set" if settings.center_set else "center_unset")
+        self.notifier.emit("radius_set" if settings.radius_ready else "radius_unset")
+        needs_confirmation = settings.enabled and not settings.personal_use_confirmed
+        self.notifier.emit("personal_use_required" if needs_confirmation else "personal_use_confirmed")
+        if settings.uses_online and not self._lag_notice_logged:
+            _logger.info("%s", ONLINE_LAG_NOTICE)
+        self._lag_notice_logged = settings.uses_online
         for warning in self.store.warnings:
             if warning not in self._logged_warnings:
                 _logger.warning("%s", warning)
@@ -127,7 +137,10 @@ class Daemon:
             name = command["command"]
             if name == commands.TEST:
                 seconds = commands.test_seconds(command.get("seconds"))
-                _logger.info("Test trigger for %s s", seconds)
+                if self.settings.enabled:
+                    _logger.info("Test trigger for %s s", seconds)
+                else:
+                    _logger.info("Test trigger ignored because SkyGuard is disabled")
                 self.engine.start_test(self._clock(), seconds)
             else:
                 self._pending_enabled = name == commands.ENABLE
@@ -145,13 +158,13 @@ class Daemon:
 
     def _evaluate(self, feed_state):
         settings = self.settings
-        if not settings.center_set:
+        if not settings.center_set or not settings.radius_ready:
             return None
         return evaluate_zone(
             feed_state.aircraft,
             settings.center_lat,
             settings.center_lon,
-            settings.radius_nm,
+            settings.radius_nm_for(feed_state.active_feed),
             settings.alt_floor_ft,
             settings.alt_ceiling_ft,
             settings.count_no_position,
@@ -220,6 +233,8 @@ class Daemon:
             Inputs(
                 enabled=settings.enabled,
                 center_set=settings.center_set,
+                radius_set=settings.radius_ready,
+                personal_use_confirmed=settings.personal_use_confirmed,
                 in_schedule=self._in_schedule,
                 data_fresh=self.feed.data_fresh(now),
                 aircraft=in_zone,
@@ -267,6 +282,7 @@ class Daemon:
                 resolved,
                 warnings,
                 self._wall_clock(),
+                notices=(ONLINE_LAG_NOTICE,) if self.settings.uses_online else (),
             )
         )
 

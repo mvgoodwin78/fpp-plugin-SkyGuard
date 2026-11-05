@@ -38,10 +38,10 @@ def _aircraft_entry(evaluated, settings):
     }
 
 
-def _in_display_range(evaluated, settings):
+def _in_display_range(evaluated, radius_nm):
     if evaluated.distance_nm is None:
         return True  # no position: list it, since it may be what is holding a blackout
-    return evaluated.distance_nm <= settings.radius_nm * DISPLAY_RANGE_RADII
+    return evaluated.distance_nm <= radius_nm * DISPLAY_RANGE_RADII
 
 
 def build_status(
@@ -55,8 +55,11 @@ def build_status(
     resolved_fixtures,
     warnings,
     updated_at,
+    notices=(),
 ):
     aircraft = zone.aircraft if zone is not None else ()
+    feed = feed_state.active_feed
+    radius_nm = settings.radius_nm_for(feed)
     return {
         "state": state,
         "reason": reason,
@@ -67,8 +70,13 @@ def build_status(
         "last_data_age_s": None if data_age_s is None else round(data_age_s, 1),
         "aircraft_in_zone": len(zone.in_zone) if zone is not None else 0,
         "center": {"lat": settings.center_lat, "lon": settings.center_lon},
-        "radius": {"value": settings.radius, "unit": settings.radius_unit},
-        "aircraft": [_aircraft_entry(a, settings) for a in aircraft if _in_display_range(a, settings)],
+        "radius": {
+            "value": settings.radius_for(feed),
+            "unit": settings.radius_unit,
+            "online": settings.radius,
+            "receiver": settings.radius_receiver,
+        },
+        "aircraft": [_aircraft_entry(a, settings) for a in aircraft if _in_display_range(a, radius_nm)],
         "fixtures": [
             {
                 "name": fixture.name,
@@ -82,6 +90,7 @@ def build_status(
             for fixture in resolved_fixtures
         ],
         "warnings": list(warnings),
+        "notices": list(notices),
         "updated_at": updated_at,
     }
 

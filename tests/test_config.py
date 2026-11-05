@@ -42,13 +42,13 @@ class SettingsDefaultsTests(unittest.TestCase):
         s = load_settings({})
         self.assertTrue(s.enabled)
         self.assertEqual(s.source_mode, "both")
-        self.assertEqual(s.online_provider, "adsb.lol")
+        self.assertEqual(s.online_provider, "adsb.fi")
         self.assertEqual(s.poll_interval_s, 1.0)
         self.assertEqual(s.online_idle_interval_s, 30.0)
         self.assertEqual(s.health_interval_s, 10.0)
         self.assertEqual(s.health_fail_count, 2)
         self.assertEqual(s.max_data_age_s, 5.0)
-        self.assertEqual((s.radius, s.radius_unit), (10.0, "mi"))
+        self.assertEqual((s.radius, s.radius_receiver, s.radius_unit), (None, None, "mi"))
         self.assertEqual((s.alt_floor_ft, s.alt_ceiling_ft), (0.0, 10000.0))
         self.assertTrue(s.count_no_position)
         self.assertEqual(s.release_delay_s, 5.0)
@@ -101,7 +101,7 @@ class SettingsValidationTests(unittest.TestCase):
 
     def test_a_saved_removed_provider_falls_back_with_a_warning(self):
         s = load_settings({"online_provider": "airplanes.live"})
-        self.assertEqual(s.online_provider, "adsb.lol")
+        self.assertEqual(s.online_provider, "adsb.fi")
         self.assertTrue(any("online_provider" in w for w in s.warnings))
 
     def test_zero_is_allowed_where_the_spec_gives_it_meaning(self):
@@ -285,7 +285,7 @@ class ConfigStoreTests(unittest.TestCase):
 
     def test_missing_files_give_defaults(self):
         store = ConfigStore(self.paths)
-        self.assertEqual(store.settings.radius, 10.0)
+        self.assertIsNone(store.settings.radius)
         self.assertEqual(store.fixtures, ())
         self.assertEqual(store.warnings, ())
 

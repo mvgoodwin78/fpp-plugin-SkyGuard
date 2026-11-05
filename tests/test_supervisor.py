@@ -325,7 +325,7 @@ class RealProcessTestCase(unittest.TestCase):
 
         with open(self.paths.config_file, "w", encoding="utf-8") as handle:
             handle.write(f'source_mode = "receiver"\nreceiver_url = "{self.feed.url("/data/aircraft.json")}"\n')
-            handle.write('release_delay_s = "1"\n')
+            handle.write('release_delay_s = "1"\nradius_receiver = "10"\npersonal_use_confirmed = "1"\n')
         with open(self.paths.private_file, "w", encoding="utf-8") as handle:
             json.dump({"center_lat": 40.0, "center_lon": -75.0}, handle)
         with open(self.paths.fixtures_file, "w", encoding="utf-8") as handle:

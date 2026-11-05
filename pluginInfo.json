@@ -2,7 +2,7 @@
 	"repoName": "fpp-plugin-SkyGuard",
 	"name": "SkyGuard",
 	"author": "mvgoodwin78",
-	"description": "Blacks out moving-head light output when aircraft are within a set radius, using a local ADS-B receiver or online flight data. If you use online data, your show's location and search radius go to the provider you choose (api.adsb.lol or opendata.adsb.fi). A typed address goes to nominatim.openstreetmap.org only when you press Look up.",
+	"description": "Blacks out moving-head light output when aircraft are within a set radius, using a local ADS-B receiver or online flight data. If you use online data, your show's location and search radius go to the provider you choose (opendata.adsb.fi or api.adsb.lol). For personal use only: it does nothing until you confirm that. A typed address goes to nominatim.openstreetmap.org only when you press Look up.",
 	"homeURL": "https://github.com/mvgoodwin78/fpp-plugin-SkyGuard",
 	"srcURL": "https://github.com/mvgoodwin78/fpp-plugin-SkyGuard.git",
 	"bugURL": "https://github.com/mvgoodwin78/fpp-plugin-SkyGuard/issues",
@@ -51,7 +51,7 @@
 		"remoteAccess": "none",
 		"systemChanges": [],
 		"closedCode": false,
-		"other": "Runs a background program while FPP runs, and forces the dimmer and shutter channels you list to their off values during a blackout. Anyone who can reach FPP can read this plugin's status, including your show's location, and can run its Enable, Disable and Test Trigger commands. Uninstalling removes its saved data."
+		"other": "For personal use only; it does nothing until you confirm that. Runs a background program while FPP runs, and forces the dimmer and shutter channels you list to their off values during a blackout. Anyone who can reach FPP can read this plugin's status, including your show's location, and can run its Enable, Disable and Test Trigger commands. Uninstalling removes its saved data."
 	},
 	"versions": [
 		{

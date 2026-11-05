@@ -18,6 +18,7 @@ from .base import FeedError
 
 DEFAULT_TIMEOUT_S = 3.0
 MAX_RESPONSE_BYTES = 16 * 1024 * 1024
+MAX_RETRY_AFTER_S = 300
 _CHUNK_BYTES = 64 * 1024
 _ALLOWED_SCHEMES = ("http", "https")
 
@@ -25,9 +26,10 @@ _ALLOWED_SCHEMES = ("http", "https")
 class FeedHttpError(FeedError):
     """The server answered with an HTTP error status."""
 
-    def __init__(self, status):
+    def __init__(self, status, retry_after=None):
         super().__init__(f"HTTP {status}")
         self.status = status
+        self.retry_after = retry_after  # seconds the server asked us to wait, if it said
 
 
 class _SafeRedirects(urllib.request.HTTPRedirectHandler):
@@ -61,6 +63,12 @@ def _read_limited(response, deadline):
         chunks.append(chunk)
 
 
+def _retry_after(headers):
+    """Seconds from a Retry-After header, capped. The date form isn't used by these services."""
+    value = (headers.get("Retry-After") or "").strip()
+    return min(int(value), MAX_RETRY_AFTER_S) if value.isdigit() else None
+
+
 def _describe(error):
     reason = getattr(error, "reason", error)
     if isinstance(reason, ssl.SSLCertVerificationError):
@@ -85,8 +93,9 @@ def fetch_json(url, timeout_s=DEFAULT_TIMEOUT_S):
             body = _read_limited(response, deadline)
     except urllib.error.HTTPError as error:
         status = error.code
+        retry_after = _retry_after(error.headers)
         error.close()
-        raise FeedHttpError(status) from None
+        raise FeedHttpError(status, retry_after) from None
     except (OSError, http.client.HTTPException) as error:
         raise FeedError(_describe(error)) from None
     try:

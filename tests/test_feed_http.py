@@ -219,6 +219,8 @@ class LiveManagerTests(ServerTestCase):
             "source_mode": "both",
             "receiver_url": self.server.url(RECEIVER_PATH),
             "online_provider": "mock",
+            "personal_use_confirmed": True,
+            "radius": 10.0,
             "center_lat": 40.0,
             "center_lon": -75.0,
             "poll_interval_s": 0.02,

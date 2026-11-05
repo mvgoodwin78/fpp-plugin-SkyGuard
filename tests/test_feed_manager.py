@@ -25,9 +25,20 @@ PLANE_978 = {"hex": "b2", "alt_baro": 2000, "lat": 40.1, "lon": -75.1, "seen_pos
 ONLINE_PLANE = {"hex": "c3", "alt_baro": 1000, "lat": 40.2, "lon": -75.2, "seen_pos": 0.5}
 
 
+def setUpModule():
+    # These tests are about the rules, so use a provider that allows the fastest rate.
+    fast = {"adsb.lol": Provider("adsb.lol", ONLINE + "v2/point/{lat}/{lon}/{nm}", 1.0)}
+    patcher = mock.patch.dict(PROVIDERS, fast)
+    patcher.start()
+    unittest.addModuleCleanup(patcher.stop)
+
+
 def settings(**overrides):
     values = {
         "source_mode": "both",
+        "online_provider": "adsb.lol",
+        "personal_use_confirmed": True,
+        "radius": 10.0,
         "receiver_url": RX,
         "center_lat": 40.0,
         "center_lon": -75.0,

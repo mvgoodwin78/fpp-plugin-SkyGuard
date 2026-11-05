@@ -18,7 +18,9 @@ REASON_NO_DATA = "no_data"
 REASON_TEST = "test"
 REASON_SCHEDULE = "schedule"
 REASON_DISABLED = "disabled"
+REASON_NOT_CONFIRMED = "not_confirmed"
 REASON_NO_CENTER = "no_center"
+REASON_NO_RADIUS = "no_radius"
 REASON_RESUME = "resume"
 REASON_CLEAR = "clear"
 
@@ -138,6 +140,8 @@ class Inputs:
     in_schedule: bool
     data_fresh: bool
     aircraft: tuple = ()  # in-zone AircraftRecords from this poll
+    radius_set: bool = True
+    personal_use_confirmed: bool = True
 
 
 @dataclass(frozen=True)
@@ -196,12 +200,17 @@ class TriggerEngine:
         if not inputs.enabled:
             self._test_until = None
             return IDLE, REASON_DISABLED
+        if not inputs.personal_use_confirmed:
+            self._test_until = None
+            return IDLE, REASON_NOT_CONFIRMED
         if self._test_until is not None:
             if now < self._test_until:
                 return BLACKOUT, REASON_TEST
             self._test_until = None
         if not inputs.center_set:
             return IDLE, REASON_NO_CENTER
+        if not inputs.radius_set:
+            return IDLE, REASON_NO_RADIUS
         if not inputs.in_schedule:
             return IDLE, REASON_SCHEDULE
         if not inputs.data_fresh:

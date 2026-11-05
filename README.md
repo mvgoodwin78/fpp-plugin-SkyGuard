@@ -6,7 +6,9 @@ An FPP plugin that blacks out moving-head light output whenever an aircraft is i
 
 ## How it works
 
-- **Aircraft data** comes from a local ADS-B receiver, an online provider (adsb.lol or adsb.fi), or the receiver with online as a fallback.
+- **Aircraft data** comes from a local ADS-B receiver, an online provider (adsb.fi or adsb.lol), or the receiver with online as a fallback.
+- **SkyGuard is for personal use only**, and it does nothing until you confirm that.
+- **Online data can lag behind real aircraft**, so increase your radius by 3 miles when using it. You enter one radius for online data and another for your own receiver, and SkyGuard stays idle until each one in use has been entered.
 - **During a show**, any qualifying aircraft inside the radius and altitude band blacks out the heads on that poll. They're released once the zone has been empty for the release delay.
 - **It fails dark.** If aircraft data stops, or SkyGuard hits an unexpected error during a show, the heads black out. If the program itself crashes during a blackout, they stay dark until it restarts.
 - **It doesn't replace your own judgment or any legal duty.** Coverage depends on what aircraft broadcast and on your data source, and not every aircraft can be seen.

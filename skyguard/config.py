@@ -17,6 +17,8 @@ from .feeds.online_adsbx_v2 import DEFAULT_PROVIDER, MAX_QUERY_RADIUS_NM, PROVID
 from .geo import to_nm
 
 DEFAULT_MEDIA_DIR = "/home/fpp/media"
+FEED_RECEIVER = "receiver"
+FEED_ONLINE = "online"
 SOURCE_MODES = ("receiver", "online", "both")
 RADIUS_UNITS = ("mi", "nm", "km")
 GEOCODERS = ("nominatim", "off")
@@ -70,6 +72,7 @@ class Settings:
     receiver_978_url: str = ""
     online_provider: str = DEFAULT_PROVIDER
     online_api_key: str = ""
+    personal_use_confirmed: bool = False  # the plugin does nothing until this is confirmed
     poll_interval_s: float = 1.0
     online_idle_interval_s: float = 30.0
     health_interval_s: float = 10.0
@@ -77,7 +80,8 @@ class Settings:
     max_data_age_s: float = 5.0
     center_lat: float | None = None
     center_lon: float | None = None
-    radius: float = 10.0
+    radius: float | None = None  # used with online data; the user must enter it
+    radius_receiver: float | None = None  # used with a receiver; the user must enter it
     radius_unit: str = "mi"
     alt_floor_ft: float = 0.0
     alt_ceiling_ft: float = 10000.0
@@ -102,8 +106,34 @@ class Settings:
         return self.center_lat is not None and self.center_lon is not None
 
     @property
+    def uses_online(self):
+        return self.source_mode in ("online", "both")
+
+    @property
+    def uses_receiver(self):
+        if self.source_mode == "receiver":
+            return True
+        return self.source_mode == "both" and bool(self.receiver_url or self.receiver_978_url)
+
+    @property
+    def radius_ready(self):
+        """Whether a radius has been entered for every data source in use."""
+        if self.uses_online and self.radius is None:
+            return False
+        return not (self.uses_receiver and self.radius_receiver is None)
+
+    def radius_for(self, feed):
+        """The radius entered for `feed`, in the user's unit, or None."""
+        return self.radius_receiver if feed == FEED_RECEIVER else self.radius
+
+    def radius_nm_for(self, feed):
+        value = self.radius_for(feed)
+        return None if value is None else to_nm(value, self.radius_unit)
+
+    @property
     def radius_nm(self):
-        return to_nm(self.radius, self.radius_unit)
+        """The radius used with online data, which is also what online queries must cover."""
+        return self.radius_nm_for(FEED_ONLINE)
 
 
 @dataclass(frozen=True)
@@ -194,7 +224,10 @@ class _Reader:
         self.warnings = []
 
     def _fail(self, key, default):
-        self.warnings.append(f"Setting '{key}' is invalid; using the default ({default}).")
+        if default is None:
+            self.warnings.append(f"Setting '{key}' is invalid, so it is treated as not set.")
+        else:
+            self.warnings.append(f"Setting '{key}' is invalid; using the default ({default}).")
         return default
 
     def _value(self, key, parse):
@@ -212,6 +245,8 @@ class _Reader:
 
     def number(self, key, low=None, high=None, parse=_parse_float):
         value = self._value(key, parse)
+        if value is None:
+            return None
         if (low is not None and value < low) or (high is not None and value > high):
             return self._fail(key, getattr(self.defaults, key))
         return value
@@ -260,12 +295,14 @@ def load_settings(raw, private=None):
         receiver_978_url=read.url("receiver_978_url"),
         online_provider=read.choice("online_provider", tuple(PROVIDERS)),
         online_api_key=str(private.get("online_api_key") or ""),
+        personal_use_confirmed=read.boolean("personal_use_confirmed"),
         poll_interval_s=read.number("poll_interval_s", 1, 2),
         online_idle_interval_s=read.number("online_idle_interval_s", 5, 300),
         health_interval_s=read.number("health_interval_s", 1),
         health_fail_count=read.number("health_fail_count", 1, parse=_parse_int),
         max_data_age_s=read.number("max_data_age_s", 0),
         radius=read.number("radius", 0.01),
+        radius_receiver=read.number("radius_receiver", 0.01),
         radius_unit=read.choice("radius_unit", RADIUS_UNITS),
         alt_floor_ft=read.number("alt_floor_ft"),
         alt_ceiling_ft=read.number("alt_ceiling_ft"),
@@ -296,7 +333,7 @@ def load_settings(raw, private=None):
             alt_floor_ft=defaults.alt_floor_ft,
             alt_ceiling_ft=defaults.alt_ceiling_ft,
         )
-    if settings.radius_nm > MAX_QUERY_RADIUS_NM:
+    if settings.radius_nm is not None and settings.radius_nm > MAX_QUERY_RADIUS_NM:
         warnings.append(
             f"The radius is larger than the {MAX_QUERY_RADIUS_NM} nm online feeds can query, "
             "so an online feed won't cover the whole zone."

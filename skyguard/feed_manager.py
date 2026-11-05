@@ -15,6 +15,7 @@ import threading
 import time
 from dataclasses import dataclass
 
+from .config import FEED_ONLINE, FEED_RECEIVER
 from .feeds.base import FeedError
 from .feeds.http_client import FeedHttpError, fetch_json
 from .feeds.online_adsbx_v2 import PROVIDERS, OnlineAdapter
@@ -26,9 +27,6 @@ from .feeds.receiver import (
 )
 from .notifier import LOGGER_NAME
 from .trigger import data_is_fresh
-
-FEED_RECEIVER = "receiver"
-FEED_ONLINE = "online"
 
 FROZEN_GRACE_S = 3.0  # decoders write about once a second; beyond this, `now` is stuck
 MAX_ONLINE_BACKOFF_S = 30.0
@@ -63,6 +61,7 @@ class FeedManager:
         self._force_poll = False
         self._last_attempt = None
         self._online_4xx_count = 0
+        self._retry_not_before = None
 
         self._aircraft = ()
         self._skipped = 0
@@ -113,7 +112,13 @@ class FeedManager:
 
     @property
     def _online_allowed(self):
-        return self._settings.enabled and self._settings.center_set
+        settings = self._settings
+        return (
+            settings.enabled
+            and settings.center_set
+            and settings.radius is not None
+            and settings.personal_use_confirmed
+        )
 
     def _choose_active(self):
         mode = self._settings.source_mode
@@ -191,12 +196,13 @@ class FeedManager:
                 self._reset_receiver_tracking()
                 self._notifier.emit("receiver_restored")
                 self._notifier.emit("receiver_978_restored")
-            if old.enabled != settings.enabled or old.center_set != settings.center_set:
+            if old.enabled != settings.enabled or old.center_set != settings.center_set or old.personal_use_confirmed != settings.personal_use_confirmed:
                 self._generation += 1  # a request in flight may no longer be wanted
             if receiver_changed or query_changed:
                 self._generation += 1
                 self._force_poll = True
                 self._online_4xx_count = 0
+                self._retry_not_before = None
                 self._last_feed_now = None
             self._refresh_active()
             self._update_feeds_down(self._clock())
@@ -222,6 +228,9 @@ class FeedManager:
 
     def _poll_is_due(self, now):
         if not self._can_poll:
+            return False
+        # A server's request to wait beats everything, including the poll at show start.
+        if self._retry_not_before is not None and now < self._retry_not_before:
             return False
         if self._force_poll or self._last_attempt is None:
             return True
@@ -281,6 +290,8 @@ class FeedManager:
         self._current_feed_failing = True
         if self._active == FEED_ONLINE and isinstance(error, FeedHttpError) and 400 <= error.status < 500:
             self._online_4xx_count += 1
+            if error.retry_after:
+                self._retry_not_before = self._clock() + error.retry_after
         message = str(error)
         if message != self._poll_error:
             _logger.warning("%s feed poll failed: %s", self._active, message)
@@ -398,6 +409,15 @@ class FeedManager:
 
     # What the daemon reads ------------------------------------------------------
 
+    def _max_data_age(self):
+        """The limit must allow for how often the feed is allowed to answer. With a provider
+        limited to one poll in 15 s, a 5 s limit would mean a permanent blackout."""
+        settings = self._settings
+        if self._active != FEED_ONLINE or settings.max_data_age_s == 0:
+            return settings.max_data_age_s
+        minimum = PROVIDERS[settings.online_provider].min_interval_s
+        return max(settings.max_data_age_s, 2 * max(settings.poll_interval_s, minimum))
+
     def data_fresh(self, now=None):
         with self._lock:
             now = self._clock() if now is None else now
@@ -405,7 +425,7 @@ class FeedManager:
                 now,
                 self._last_success_at,
                 self._last_poll_failed,
-                self._settings.max_data_age_s,
+                self._max_data_age(),
             )
 
     def state(self):

@@ -126,19 +126,24 @@ Receiver format notes: readsb, dump1090-fa and dump978-fa share one schema (`now
 
 | Provider | Endpoint | Minimum interval | Terms and status |
 | --- | --- | --- | --- |
-| adsb.lol (default) | `https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}` | 1 s | Limits are dynamic and an API key is planned. Live test returned 200; docs page unavailable when checked |
-| adsb.fi | `https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{nm}` | 1 s | Personal, non-commercial use only; the UI must credit and link adsb.fi. Repeated 4xx responses can restrict the IP. Live test returned 200 |
+| adsb.fi (default) | `https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{nm}` | 2 s | Publishes a limit of 1 request/s; 2 s was tested without a refusal. Personal, non-commercial use only; the UI must credit and link adsb.fi. Repeated 4xx responses can restrict the IP |
+| adsb.lol | `https://api.adsb.lol/v2/point/{lat}/{lon}/{nm}` | 15 s | Limits are dynamic and an API key is planned. Tested: refused polling at 1 s after about 19 s, and at 5 s after 8 requests; accepted 10 s for 60 s. Its Retry-After said 3 s |
 
 airplanes.live was removed from the list on Nov 5, 2026. Its API returned 403 from the dev machine with a message asking developers to contact the operator at contact@airplanes.live. Don't use the internal data URLs behind its `globe.airplanes.live` map instead. It can return as one row here if the operator approves access for end users' devices.
 
-The query radius is capped at 250 nm. Any 4xx or 429 response counts as a failed poll and is never retried faster than the normal interval. While a provider keeps refusing, the online interval doubles per refusal up to 30 s and returns to normal on the first success, because repeated 4xx responses can get an address restricted. An immediate poll at show start still happens during this backoff.
+The query radius is capped at 250 nm. Any 4xx or 429 response counts as a failed poll and is never retried faster than the normal interval. While a provider keeps refusing, the online interval doubles per refusal up to 30 s and returns to normal on the first success, because repeated 4xx responses can get an address restricted. An immediate poll at show start still happens during this backoff, unless the provider sent `Retry-After`, which is always honored (capped at 300 s).
+
+### Personal use and network lag
+
+- **Confirmation:** SkyGuard as a whole is for personal use only, on every setup including receiver-only. `personal_use_confirmed` starts false. Until it is true, the plugin stays IDLE with reason `not_confirmed`, holds no channels, makes no online requests, doesn't run Test Trigger, and `personal_use_required` shows a warning. Receiver polling continues so status stays useful, and setting it takes effect without a restart. The confirmation is the first step of first-run setup.
+- **Lag:** whenever `online` or `both` mode is selected, `notices[]` in the status, the Location & Zone tab and a log line say: "Online flight data can lag behind real aircraft. Increase your radius by 3 miles to allow for it." It is a notice rather than a warning because it would otherwise light FPP's header icon permanently and teach people to ignore it.
 
 ### Polling
 
 - **Receiver:** always poll every 1–2 s (user setting, default 1 s), in or out of the show window, and also while the plugin is disabled.
-- **Online, inside the show window:** poll every 1–2 s (same setting). Each provider has its own minimum interval; the plugin enforces the larger of the user setting and the provider minimum.
+- **Online, inside the show window:** poll at the same setting, but never faster than the provider's minimum interval (see Online providers), which in practice sets the rate.
 - **Online, outside the show window:** poll every `online_idle_interval_s` (default 30 s) so free services aren't hit once a second all year.
-- **Online, plugin disabled or center not set:** no online requests at all.
+- **Online, plugin disabled, center or online radius not set, or personal use not confirmed:** no online requests at all.
 - **Show window starts:** poll the active feed immediately, without waiting for the next interval.
 - FPP's status is read every 1 s regardless of the feed interval, so the start of a show is noticed quickly even at the 30 s online interval.
 - HTTP timeout per request: 3 s. Polling, health checks and the 978 decoder run on separate threads, so a dead host that takes the whole timeout to fail doesn't delay the others.
@@ -166,6 +171,7 @@ Separately from health checks, track the time since the last successful poll of 
 A poll is successful only if the feed's `now` has changed since the previous one. A decoder can die while its web server keeps serving the last `aircraft.json`, and a frozen file must not look like a healthy, possibly empty, sky. An unchanged `now` is not a failure for the first 3 s, since decoders write about once a second; after that it counts as a failed poll. Only change is checked, not the time itself, so a wrong clock on either device doesn't matter.
 
 - **Max data age** setting, default 5 s. If no successful poll within that time, force a blackout immediately (reason: `no_data`).
+- On an online feed the limit is the larger of this setting and two poll intervals, because a provider limited to one poll in 15 s could never meet a 5 s limit. That makes it 5 s on adsb.fi and 30 s on adsb.lol, so on adsb.lol an aircraft can be seen up to 15 s late and an outage can take about 30 s to darken the heads.
 - Setting 0 = blackout on the first failed poll.
 - Blackout holds until a feed (either one) delivers a successful poll again.
 - Data age only drives a blackout inside the show window. If a show starts while online data is older than max data age, the heads black out with reason `no_data` until the immediate poll succeeds and the release delay has passed. This fails dark on purpose, and can darken the first seconds of a show on an online feed.
@@ -176,7 +182,7 @@ No aircraft records are discarded for age or ground status; see the trigger engi
 
 ## Trigger engine
 
-The zone is one circle: a center lat/lon plus a radius, filtered by an altitude floor and ceiling. Any qualifying aircraft inside it puts the plugin in BLACKOUT; the zone must be empty for the release delay before channels are released.
+The zone is one circle: a center lat/lon plus a radius, filtered by an altitude floor and ceiling. `radius` applies with online data and `radius_receiver` applies while a receiver is the active feed, so in `both` mode the radius changes automatically on fallback. The user must enter both: neither has a default, and neither borrows the other. Until a radius is entered for every data source in use, SkyGuard stays IDLE with reason `no_radius` and a warning, and makes no online requests. Any qualifying aircraft inside it puts the plugin in BLACKOUT; the zone must be empty for the release delay before channels are released.
 
 ### Center point
 
@@ -212,17 +218,17 @@ A skipped aircraft is not part of `aircraft_in_zone`, the release delay or the m
 
 | State | Entered when | Heads |
 | --- | --- | --- |
-| IDLE | Outside the show schedule, plugin disabled, or center not set | Released; no overlays held |
+| IDLE | Outside the show schedule, plugin disabled, personal use not confirmed, center not set, or a required radius not entered | Released; no overlays held |
 | CLEAR | In schedule, data fresh, `aircraft_in_zone` = 0 for ≥ release delay | Released to the sequence |
 | BLACKOUT | In schedule and (`aircraft_in_zone` ≥ 1, or data older than max data age) | Forced to off values |
 
 - Entering BLACKOUT happens on the same poll the condition is seen; no delay.
 - Leaving BLACKOUT requires the zone empty and data fresh continuously for `release_delay_s` (user setting, default 5 s; 0 = release immediately).
 - Entering the window with fresh data and an empty zone goes straight to CLEAR. The release delay applies only to leaving BLACKOUT.
-- Precedence, highest first: disabled, active test, center not set, outside the window, stale data, aircraft in zone. A test therefore works outside the show window and before the center is set, but not while disabled.
+- Precedence, highest first: disabled, personal use not confirmed, active test, center not set, radius not entered, outside the window, stale data, aircraft in zone. A test therefore works outside the show window and before the center is set, but not while disabled or before personal use is confirmed.
 - When a test ends, normal evaluation resumes at once with no release delay.
 - If the daemon restarts and its ledger shows ranges still held (see How the override is applied), it starts in BLACKOUT with reason `resume` and applies the normal rules from there.
-- Every transition is logged with reason (`aircraft`, `no_data`, `test`, `schedule`, `disabled`, `no_center`, `resume`, `clear`) and the aircraft that caused it. A reason change within BLACKOUT is logged too.
+- Every transition is logged with reason (`aircraft`, `no_data`, `test`, `schedule`, `disabled`, `not_confirmed`, `no_center`, `no_radius`, `resume`, `clear`) and the aircraft that caused it. A reason change within BLACKOUT is logged too.
 
 Units: radius in miles or nautical miles or km (user choice, default statute miles), altitude in feet.
 
@@ -350,6 +356,8 @@ FPP has no way for a plugin to raise a banner warning: warnings are raised only 
 | `internal_error` / `internal_ok` | The main loop hits an unexpected error / a step completes normally | Raise / clear warning + log |
 | `plugin_disabled` / `plugin_enabled` | Disable / Enable command | Raise / clear "SkyGuard disabled" + log |
 | `center_unset` / `center_set` | Center missing / provided | Raise / clear warning + log |
+| `radius_unset` / `radius_set` | A required radius is missing / all are entered | Raise / clear warning + log |
+| `personal_use_required` / `personal_use_confirmed` | Enabled and not confirmed / confirmed | Raise / clear warning + log |
 | `ground_aircraft_ignored` | An aircraft in the zone is first skipped as on the ground | Log |
 
 ### Notifier interface
@@ -395,7 +403,7 @@ A `callbacks` script is required so commands live-register on install without an
 
 Served through the template's `api.php` at `/api/plugin/fpp-plugin-SkyGuard/status`, reading a status JSON the daemon rewrites (atomic write in `plugindata/`). It writes at once when the state, reason, enabled setting, show window, active feed, in-zone count or warnings change, and otherwise every 5 s. That matches the 5 s map refresh and spares the SD card a write every second all year.
 
-Fields: `state`, `reason`, `enabled`, `in_schedule`, `active_feed`, `receiver_ok`, `last_data_age_s`, `aircraft_in_zone`, `center`, `radius`, `aircraft[]` (normalized records with `distance` and `in_zone`), `fixtures[]` (name, resolved channels, valid), `warnings[]`, `updated_at`.
+Fields: `state`, `reason`, `enabled`, `in_schedule`, `active_feed`, `receiver_ok`, `last_data_age_s`, `aircraft_in_zone`, `center`, `radius`, `aircraft[]` (normalized records with `distance` and `in_zone`), `fixtures[]` (name, resolved channels, valid), `warnings[]`, `notices[]`, `updated_at`. `radius` carries the `value` in force for the active feed, its `unit`, and the `online` and `receiver` settings.
 
 Each `aircraft[]` record also carries `ground_ignored`, and a `note` of `ground (ignored)` when that is true.
 
@@ -419,7 +427,8 @@ Every setting below lives in `config/plugin.fpp-plugin-SkyGuard` except the fixt
 | `source_mode` | both | `receiver`, `online`, `both` |
 | `receiver_url` | empty | e.g. `http://<receiver-ip>/data/aircraft.json` |
 | `receiver_978_url` | empty | Optional second decoder |
-| `online_provider` | adsb.lol | From the provider list |
+| `online_provider` | adsb.fi | From the provider list |
+| `personal_use_confirmed` | false | The plugin stays IDLE until true, on every setup. Set by first-run setup |
 | `online_api_key` | empty | **Private.** Loaded but not sent yet: none of the current providers takes a key. Never logged, never in a URL |
 | `poll_interval_s` | 1 | 1–2; floored at provider minimum for online |
 | `online_idle_interval_s` | 30 | Online feed outside the show window, 5–300. Receiver polling isn't affected |
@@ -427,7 +436,9 @@ Every setting below lives in `config/plugin.fpp-plugin-SkyGuard` except the fixt
 | `health_fail_count` | 2 | Misses before fallback |
 | `max_data_age_s` | 5 | 0 = blackout on first failed poll |
 | `center_lat` / `center_lon` | empty | **Private.** Plugin stays IDLE with a warning until set |
-| `radius` / `radius_unit` | 10 / mi | `mi`, `nm`, `km` |
+| `radius` | none | User must enter it. Used with online data |
+| `radius_receiver` | none | User must enter it. Used while a receiver is the active feed |
+| `radius_unit` | mi | `mi`, `nm`, `km`. Applies to both |
 | `alt_floor_ft` / `alt_ceiling_ft` | 0 / 10000 | Inclusive |
 | `count_no_position` | true | Aircraft with altitude but no position count as in zone |
 | `ignore_ground` | false | Skip aircraft on the ground; see Ignoring ground traffic |
@@ -509,7 +520,9 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 ### First-run setup
 
 - Shown at the top of the Settings page until every step is completed or skipped.
-- Steps in order: 1 Data feed, 2 Location & zone, 3 Fixtures, 4 Matrix message, 5 Test run (fires SkyGuard Test Trigger). Each step has a Skip option.
+- It opens with a confirmation that SkyGuard is for personal use only, which sets `personal_use_confirmed`. It has no Skip, because the plugin stays idle without it.
+- Steps in order: 1 Data feed, 2 Location & zone, 3 Fixtures, 4 Matrix message, 5 Test run (fires SkyGuard Test Trigger). Each of these has a Skip option.
+- The Data feed step starts by asking whether the user has their own ADS-B receiver. No selects `online` mode, and receiver settings and the receiver radius aren't shown or required anywhere. Yes then asks whether to use online data as a fallback (`both`) or the receiver alone (`receiver`).
 - Progress stored in a `setup_state` setting. No "run setup again" link afterwards; skipped items are set from the tabs.
 
 ### Settings page tabs
@@ -517,7 +530,7 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 | Tab | Contents |
 | --- | --- |
 | Data Source | Source mode; receiver URL and optional 978 URL with a Test button (shows aircraft seen or the error); online provider dropdown, masked API key field, Test button |
-| Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); Use my location button (disabled with a note when the page isn't HTTPS); display-only map of the center point and radius circle (no draggable pin); radius + unit; altitude floor and ceiling; "Ignore aircraft on the ground" switch |
+| Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); Use my location button (disabled with a note when the page isn't HTTPS); display-only map of the center point and radius circle (no draggable pin); online radius and receiver radius as required entries with no pre-filled value, shown according to the data sources in use, and their unit; the lag notice when online data is selected; altitude floor and ceiling; "Ignore aircraft on the ground" switch |
 | Fixtures | Table, one row per head: name, universe or start channel, dimmer ch, dimmer off, shutter ch, shutter off, enabled. Add, duplicate, delete. Per-row Test button blacks out that head only for 3 s |
 | Matrix Message | Enable switch; panel picker from the FPP overlay model list; message field with click-to-insert placeholder buttons; live preview with sample values; no-data message; color, font, size, speed |
 | Advanced (collapsed) | Poll interval, online idle interval, health interval, fail count, max data age, release delay, count-no-position toggle, ground speed limit, units |
@@ -570,7 +583,7 @@ Seen on the real 10.3 box:
 | 4 | Schedule status | See Schedule awareness. Idle and a sequence started by hand confirmed on 10.3. **Box check** of a scheduled playlist and the gap between its items |
 | 5 | Banner warnings | **No supported API.** Replaced by header indicator, status data and log. **Box test** of the indicator after the build |
 | 6 | Text overlay | See Matrix message. Display state, scrolling, stop and restore confirmed on 10.3. **Box test** on 9.5, and of how it looks on a real panel, non-ASCII text, and Virtual Display |
-| 7 | Online providers | adsb.lol and adsb.fi tested live. airplanes.live removed (see Online providers) |
+| 7 | Online providers | Polling tested live: see Online providers. **adsb.lol's original 1 s minimum failed on a real box**, which is why the default changed to adsb.fi. airplanes.live removed |
 | 8 | Receiver formats | Confirmed from documentation or source for readsb, dump1090-fa and dump978-fa. tar1090 reuses the decoder's JSON (not independently checked). **Box check** with a real file from the user's receiver |
 | 9 | Geocoder | Nominatim is acceptable for a user-pressed lookup under its [usage policy](https://operations.osmfoundation.org/policies/nominatim/); see the `geocoder` setting |
 | 10 | Commands | Format confirmed. Live load exists from 10.0, not on 9.5. **Box test** after the build |
@@ -587,6 +600,9 @@ Seen on the real 10.3 box:
 6. Keep `count_no_position` on by default, and review it against real traffic during acceptance.
 6a. Count live bridged data as a show.
 7. Remove airplanes.live from the provider list until its operator approves access.
+7a. Make adsb.fi the default at 2 s, and keep adsb.lol at 15 s.
+7b. Add a second radius for use with a receiver, a notice to increase the radius by 3 miles for online lag, and a personal-use confirmation covering the whole plugin.
+7c. Both radii are user entered, with no defaults and no fallback between them.
 8. Add an optional ground-traffic filter (`ignore_ground`, `ground_speed_limit_kt`), off by default. It requires a `ground` report, with a speed below the limit or no speed, and uses no numeric altitude, airport elevation or aircraft type. Helicopters below the limit are counted unless they report `ground`.
 
 ### Known risks to review during acceptance
@@ -622,7 +638,10 @@ Phase 1 is done when every test below passes on a Pi 4 running FPP 9.5 and on cu
 - [ ] Daemon killed mid-blackout → heads stay dark; supervisor restarts it; it resumes with reason `resume` and releases only once the normal rules are met
 - [ ] Daemon killed mid-blackout with a fixture removed while it is down → that fixture's channel is still released
 - [ ] On FPP 9.5 and 10.2, release after an fppd restart never produces a full-on channel
-- [ ] Online feed outside the show window polls about every 30 s, inside it at the normal rate, with an immediate poll at show start; no online requests while disabled; receiver polling stays fast throughout
+- [ ] Online feed outside the show window polls about every 30 s, inside it at the provider's rate with no refusals for a whole show, with an immediate poll at show start; no online requests while disabled or before personal use is confirmed; receiver polling stays fast throughout
+- [ ] `both` mode with both radii entered: the radius in force changes when the feed falls back and when it returns
+- [ ] A required radius not entered: IDLE with reason `no_radius` and a warning, and no online requests; entering it starts protection without a restart
+- [ ] First-run: on every setup the plugin stays IDLE with a warning until personal use is confirmed, then starts without a restart; the lag notice shows whenever online data is selected
 - [ ] A USB DMX head using `start_channel` blacks out correctly
 - [ ] Header indicator appears on a warning and when the daemon is stopped, and clears afterwards
 - [ ] Install and uninstall each run twice cleanly; only one log file exists

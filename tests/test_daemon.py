@@ -21,7 +21,7 @@ from skyguard.status import PERIODIC_WRITE_S
 from tests.fake_fpp_server import FakeFpp
 
 RECEIVER = "http://rx/aircraft.json"
-ONLINE_PREFIX = "https://api.adsb.lol/"
+ONLINE_PREFIX = "https://opendata.adsb.fi/"
 CENTER = {"center_lat": 40.0, "center_lon": -75.0}
 INSIDE = {"lat": 40.05, "lon": -75.0}  # about 3 nm from center
 OUTSIDE = {"lat": 41.0, "lon": -75.0}  # about 60 nm from center
@@ -74,6 +74,9 @@ class Rig:
             "source_mode": "receiver",
             "receiver_url": RECEIVER,
             "release_delay_s": "5",
+            "personal_use_confirmed": "1",
+            "radius": "10",
+            "radius_receiver": "10",
         }
         self._tick = 0
         self.write_settings()
@@ -823,7 +826,7 @@ class StatusAcceptanceTests(unittest.TestCase):
         self.assertEqual(status["active_feed"], "receiver")
         self.assertEqual(status["aircraft_in_zone"], 1)
         self.assertEqual(status["center"], {"lat": 40.0, "lon": -75.0})
-        self.assertEqual(status["radius"], {"value": 10.0, "unit": "mi"})
+        self.assertEqual(status["radius"], {"value": 10.0, "unit": "mi", "online": 10.0, "receiver": 10.0})
         self.assertEqual(status["updated_at"], self.r.wall)
 
     def test_aircraft_entries(self):
@@ -910,7 +913,7 @@ class PrivacyTests(unittest.TestCase):
             r.online_down = False
             r.tick(steps=3)
         text = "\n".join(captured.output)
-        for private in ("hunter2", "12.3456", "65.4321", "api.adsb.lol"):
+        for private in ("hunter2", "12.3456", "65.4321", "opendata.adsb.fi"):
             self.assertNotIn(private, text)
 
 

@@ -28,6 +28,7 @@ class MockRoute:
         self.delay_s = 0.0
         self.frozen = False
         self.raw_body = None
+        self.headers = {}
         self.requests = 0
         self._now = 1793900000.0
 
@@ -69,6 +70,8 @@ class MockFeedServer:
                     self.send_response(status)
                     self.send_header("Content-Type", "application/json")
                     self.send_header("Content-Length", str(len(body)))
+                    for name, value in route.headers.items():
+                        self.send_header(name, value)
                     self.end_headers()
                     self.wfile.write(body)
                 except OSError:
