@@ -289,6 +289,7 @@ Ranges live in fppd's memory, not in the daemon, so they outlast it.
 | Daemon keeps crashing | Heads stay dark for as long as it stays down. The supervisor retries forever with a capped backoff |
 | fppd restarts while the daemon is down | Ranges are lost, so heads follow the sequence until the daemon is back. `postStart.sh` starts it if it isn't running |
 | Crash during CLEAR | Nothing is held, so the heads are unprotected until the daemon returns. This is the gap the supervisor exists to shorten |
+| Supervisor killed, daemon still running | Protection continues, but nothing would restart the daemon after a crash. The daemon notices its parent has changed and raises `supervisor_lost`, a warning that stays until the next fppd start, which replaces both |
 | Daemon and supervisor both killed | Held ranges stay and nothing restarts until the next fppd start |
 | Ledger corrupt | Resume in BLACKOUT holding the channels of all current fixtures, release them under the normal rules, and warn that a removed fixture's range could stay until fppd restarts |
 | Ledger missing | Treated as a first start: nothing has been held. A file deleted by hand could leave a range held until fppd restarts |
@@ -353,6 +354,7 @@ FPP has no way for a plugin to raise a banner warning: warnings are raised only 
 | `fixture_invalid` | A fixture's universe can't be resolved | Warning + log |
 | `fixture_resolved` | That fixture resolves again or is removed | Clear warning + log |
 | `overlay_failed` / `overlay_restored` | FPP refuses or misses a channel set or delete / all succeed again | Raise / clear warning + log |
+| `supervisor_lost` | The daemon's supervisor has died | Warning + log. Cleared by the fppd restart it recommends |
 | `internal_error` / `internal_ok` | The main loop hits an unexpected error / a step completes normally | Raise / clear warning + log |
 | `plugin_disabled` / `plugin_enabled` | Disable / Enable command | Raise / clear "SkyGuard disabled" + log |
 | `center_unset` / `center_set` | Center missing / provided | Raise / clear warning + log |
@@ -589,6 +591,8 @@ Seen on the real 10.3 box:
 | 10 | Commands | Format confirmed. Live load exists from 10.0, not on 9.5. **Box test** after the build |
 | 11 | Map | Leaflet (BSD-2-Clause). [OSM tile policy](https://operations.osmfoundation.org/policies/tiles/) reviewed. **Box check** of tile loading and Referer in phase 1b |
 | 12 | Plugin API saves | Confirmed on 9.5: `api.php` endpoints may use GET, POST, PUT or DELETE. **Box test** after the build |
+
+- **Crash recovery on the real box:** a daemon killed with `kill -9` during a blackout was restarted by the supervisor, resumed in BLACKOUT and went on to release and black out normally. With the supervisor killed, the daemon kept running; an fppd restart then left exactly one new supervisor and one new daemon. Blackout state here means SkyGuard's own state, since this box's channel outputs are off.
 
 ### Owner decisions, Nov 5, 2026
 

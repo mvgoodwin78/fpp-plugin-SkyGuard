@@ -428,6 +428,20 @@ class RealSupervisorTests(RealProcessTestCase):
             except OSError:
                 pass
 
+    @unittest.skipIf(os.name == "nt", "a dead parent can't be seen on Windows")
+    def test_a_killed_supervisor_raises_a_warning_and_protection_continues(self):
+        supervisor = self.start("skyguard.supervisor", "run", "--fpp-url", self.fpp.url)
+        self.assertTrue(wait_until(lambda: self.fpp.ranges.get(10) == 0), self.log())
+        self.assertFalse(any("supervisor" in w for w in self.status().get("warnings", [])))
+        pid = self.daemon_pid()
+        self.addCleanup(self.kill_pid, pid)
+        supervisor.kill()
+        supervisor.wait(5)
+        self.assertTrue(wait_until(lambda: "supervisor_lost" in self.log()), self.log())
+        self.assertTrue(wait_until(lambda: any("supervisor" in w for w in self.status().get("warnings", []))))
+        self.route.docs = [{"aircraft": []}]
+        self.assertTrue(wait_until(lambda: self.fpp.output(10) == 100), self.log())
+
     @unittest.skipIf(os.name == "nt", "Windows can't deliver SIGTERM for a graceful stop")
     def test_stop_releases_the_channels(self):
         self.start("skyguard.supervisor", "run", "--fpp-url", self.fpp.url)

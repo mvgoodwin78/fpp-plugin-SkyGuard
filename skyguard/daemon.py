@@ -49,7 +49,18 @@ def setup_logging(paths):
 
 
 class Daemon:
-    def __init__(self, paths, api, fetch=None, clock=time.monotonic, wall_clock=time.time):
+    def __init__(
+        self,
+        paths,
+        api,
+        fetch=None,
+        clock=time.monotonic,
+        wall_clock=time.time,
+        supervisor_pid=None,
+        parent_pid=os.getppid,
+    ):
+        self._supervisor_pid = supervisor_pid  # None when not started by the supervisor
+        self._parent_pid = parent_pid
         self.paths = paths
         self.api = api
         self._clock = clock
@@ -131,6 +142,12 @@ class Daemon:
             self._last_setting_attempt = None
         except FppError as error:
             _logger.warning("Could not save the enabled setting: %s", error)
+
+    def _check_supervisor(self):
+        """If the supervisor dies, this process gets a new parent. Nothing would then restart
+        us after a crash, and the heads would be unprotected if that happened in CLEAR."""
+        if self._supervisor_pid is not None and self._parent_pid() != self._supervisor_pid:
+            self.notifier.emit("supervisor_lost")
 
     def _run_commands(self):
         for command in commands.read_pending(self.paths, self._wall_clock):
@@ -220,6 +237,7 @@ class Daemon:
 
     def _step(self):
         now = self._clock()
+        self._check_supervisor()
         self._run_commands()
         self._reload_settings()
         self._read_schedule(now)
@@ -345,6 +363,7 @@ class Daemon:
 def main(argv=None):
     parser = argparse.ArgumentParser(description="SkyGuard daemon")
     parser.add_argument("--fpp-url", default=BASE_URL, help=argparse.SUPPRESS)  # tests only
+    parser.add_argument("--supervisor-pid", type=int, default=None, help=argparse.SUPPRESS)
     args = parser.parse_args(argv)
 
     paths = Paths.from_env()
@@ -353,7 +372,7 @@ def main(argv=None):
         os.makedirs(paths.data_dir, exist_ok=True)
         with open(paths.daemon_pid_file, "w", encoding="ascii") as handle:
             handle.write(str(os.getpid()))
-        daemon = Daemon(paths, FppApi(args.fpp_url))
+        daemon = Daemon(paths, FppApi(args.fpp_url), supervisor_pid=args.supervisor_pid)
         signal.signal(signal.SIGTERM, daemon.request_stop)
         signal.signal(signal.SIGINT, daemon.request_stop)
         daemon.run()

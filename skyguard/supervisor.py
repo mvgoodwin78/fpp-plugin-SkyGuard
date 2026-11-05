@@ -34,7 +34,7 @@ _PLUGIN_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 def spawn_daemon(extra_args=()):
     return subprocess.Popen(
-        [sys.executable, "-m", "skyguard.daemon", *extra_args],
+        [sys.executable, "-m", "skyguard.daemon", "--supervisor-pid", str(os.getpid()), *extra_args],
         cwd=_PLUGIN_DIR,
         stdin=subprocess.DEVNULL,
         stdout=subprocess.DEVNULL,  # the daemon writes its own log, which follows rotation

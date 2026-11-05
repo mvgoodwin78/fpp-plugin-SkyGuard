@@ -21,6 +21,7 @@ _WARNING_MESSAGES = {
     "all_feeds_down": "No aircraft data from any feed.",
     "plugin_disabled": "SkyGuard is disabled, so the heads are not protected.",
     "overlay_failed": "FPP didn't accept a channel change, so the heads may not black out or release.",
+    "supervisor_lost": "SkyGuard's supervisor stopped, so nothing will restart it if it crashes. Restart FPPD to fix this.",
     "internal_error": "SkyGuard hit an unexpected error. During a show, the heads are held dark. See the plugin log.",
     "center_unset": "Set a center point. SkyGuard stays idle until you do.",
     "radius_unset": "Enter a radius for each data source in use. SkyGuard stays idle until you do.",
@@ -38,6 +39,7 @@ _RAISES = {
     "radius_unset": "radius_unset",
     "personal_use_required": "personal_use_required",
     "overlay_failed": "overlay_failed",
+    "supervisor_lost": "supervisor_lost",
     "internal_error": "internal_error",
 }
 

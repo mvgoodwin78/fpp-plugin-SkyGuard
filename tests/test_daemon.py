@@ -662,6 +662,50 @@ class CrashAcceptanceTests(unittest.TestCase):
         self.assertEqual(self.r.fpp.ever_full_on, [])
 
 
+class SupervisorWatchTests(unittest.TestCase):
+    def rig(self, supervisor_pid, parent):
+        rig = Rig(self)
+        rig.daemon._supervisor_pid = supervisor_pid
+        rig.daemon._parent_pid = lambda: parent["pid"]
+        return rig
+
+    def warned(self, rig):
+        return any("supervisor" in w for w in rig.daemon.warning_sink.warnings())
+
+    def test_no_warning_while_the_supervisor_is_the_parent(self):
+        rig = self.rig(100, {"pid": 100})
+        rig.tick(3)
+        self.assertFalse(self.warned(rig))
+
+    def test_a_changed_parent_raises_the_warning_once(self):
+        parent = {"pid": 100}
+        rig = self.rig(100, parent)
+        rig.tick()
+        parent["pid"] = 1
+        with self.assertLogs("skyguard", level="WARNING") as captured:
+            rig.tick(5)
+        self.assertTrue(self.warned(rig))
+        self.assertEqual(sum("supervisor_lost" in line for line in captured.output), 1)
+
+    def test_the_warning_reaches_the_status_file(self):
+        rig = self.rig(100, {"pid": 1})
+        rig.tick()
+        self.assertTrue(any("supervisor" in w for w in rig.status()["warnings"]))
+
+    def test_protection_continues(self):
+        rig = self.rig(100, {"pid": 1})
+        rig.tick()
+        rig.aircraft = [plane()]
+        rig.tick()
+        self.assertEqual(rig.state, "BLACKOUT")
+        self.assertEqual(rig.fpp.output(A_DIMMER), 0)
+
+    def test_a_daemon_not_started_by_a_supervisor_never_warns(self):
+        rig = self.rig(None, {"pid": 1})
+        rig.tick(2)
+        self.assertFalse(self.warned(rig))
+
+
 class InternalErrorTests(unittest.TestCase):
     def setUp(self):
         self.r = Rig(self)
