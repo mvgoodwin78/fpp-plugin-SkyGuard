@@ -49,6 +49,9 @@
         } else if (aircraft.in_zone) {
             zone = 'Yes';
         }
+        if (aircraft.online_only) {
+            zone += ', receiver missed it';
+        }
         return {
             name: aircraft.callsign || aircraft.hex || 'Unknown',
             altitude: altitude,
@@ -207,6 +210,11 @@
             var note = document.createElement('div');
             note.textContent = 'ground (ignored)';
             label.appendChild(note);
+        }
+        if (aircraft.online_only) {
+            var missed = document.createElement('div');
+            missed.textContent = 'receiver missed it';
+            label.appendChild(missed);
         }
         return label;
     }

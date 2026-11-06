@@ -760,6 +760,154 @@ class HealthResultTests(unittest.TestCase):
         self.assertEqual(h.events.names.count("receiver_lost"), 0)
 
 
+class OnlineCheckTests(unittest.TestCase):
+    def setUp(self):
+        self.h = Harness()
+        self.h.manager.set_in_schedule(True)
+
+    def step(self, seconds=1.0, steps=1):
+        for _ in range(steps):
+            self.h.time += seconds
+            self.h.manager.poll_once()
+            self.h.manager.health_once()
+            self.h.manager.poll_check_once()
+
+    def checked(self):
+        return sorted(record.hex for record in self.h.manager.state().cross_check)
+
+    def test_the_receiver_stays_active_and_online_data_arrives_alongside_it(self):
+        self.step()
+        state = self.h.manager.state()
+        self.assertEqual(state.active_feed, FEED_RECEIVER)
+        self.assertEqual(self.h.hexes(), ["a1"])
+        self.assertEqual(self.checked(), ["c3"])
+        self.assertTrue(state.cross_check_active)
+
+    def test_nothing_is_sent_outside_a_show(self):
+        self.h.manager.set_in_schedule(False)
+        self.step(steps=5)
+        self.assertEqual(self.h.net.count(ONLINE), 0)
+        self.assertEqual(self.checked(), [])
+        self.assertFalse(self.h.manager.state().cross_check_active)
+
+    def test_the_data_is_dropped_when_the_show_ends(self):
+        self.step()
+        self.h.manager.set_in_schedule(False)
+        self.step()
+        self.assertEqual(self.checked(), [])
+        self.h.manager.set_in_schedule(True)
+        self.assertEqual(self.checked(), [])
+
+    def test_nothing_is_sent_when_online_is_not_allowed(self):
+        for change in ({"enabled": False}, {"personal_use_confirmed": False}, {"center_lat": None}, {"radius": None}):
+            h = Harness(**change)
+            h.manager.set_in_schedule(True)
+            h.time += 1
+            h.manager.poll_check_once()
+            self.assertEqual(h.net.count(ONLINE), 0, change)
+
+    def test_other_modes_have_no_check(self):
+        for change in ({"source_mode": "receiver"}, {"source_mode": "online"}, {"receiver_url": ""}):
+            h = Harness(**change)
+            h.manager.set_in_schedule(True)
+            h.time += 1
+            self.assertFalse(h.manager.poll_check_once(), change)
+
+    def test_it_keeps_to_the_providers_rate(self):
+        with mock.patch.dict(PROVIDERS, {"adsb.lol": Provider("adsb.lol", ONLINE + "v2/point/{lat}/{lon}/{nm}", 15.0)}):
+            self.step(steps=45)
+        self.assertEqual(self.h.net.count(ONLINE), 3)
+
+    def test_a_failed_check_warns_and_never_touches_the_receiver(self):
+        self.step()
+        self.h.net.errors[ONLINE] = FeedError("down")
+        self.step(steps=2)
+        self.assertEqual(self.checked(), ["c3"])  # still within three intervals
+        self.step(steps=10)
+        self.assertEqual(self.checked(), [])
+        self.assertIn("online_check_lost", self.h.events.names)
+        state = self.h.manager.state()
+        self.assertEqual(state.active_feed, FEED_RECEIVER)
+        self.assertTrue(self.h.manager.data_fresh())
+        self.assertNotIn("all_feeds_down", self.h.events.names)
+
+    def test_the_warning_clears_when_the_check_returns_or_the_show_ends(self):
+        self.h.net.errors[ONLINE] = FeedError("down")
+        self.step(steps=12)
+        self.assertIn("online_check_lost", self.h.events.names)
+        del self.h.net.errors[ONLINE]
+        self.step(steps=2)
+        self.assertIn("online_check_ok", self.h.events.names)
+        self.assertEqual(self.checked(), ["c3"])
+        self.h.net.errors[ONLINE] = FeedError("down")
+        self.step(steps=12)
+        self.assertTrue(any("Online data" in w for w in self.h.warnings.warnings()))
+        self.h.manager.set_in_schedule(False)
+        self.step()
+        self.assertFalse(any("Online data" in w for w in self.h.warnings.warnings()))
+
+    def test_online_data_that_stops_changing_is_dropped(self):
+        self.step()
+        self.h.net.frozen.add(ONLINE)
+        self.step(steps=12)
+        self.assertEqual(self.checked(), [])
+
+    def test_a_request_to_wait_is_honored_and_does_not_hold_up_the_receiver(self):
+        self.h.net.errors[ONLINE] = FeedHttpError(429, retry_after=20)
+        self.step()
+        calls = self.h.net.count(ONLINE)
+        receiver = self.h.net.count(RX)
+        self.step(steps=10)
+        self.assertEqual(self.h.net.count(ONLINE), calls)
+        self.assertGreater(self.h.net.count(RX), receiver)
+        self.assertTrue(self.h.manager.data_fresh())
+
+    def test_a_request_to_wait_follows_the_online_feed_into_a_fallback(self):
+        self.h.net.errors[ONLINE] = FeedHttpError(429, retry_after=100)
+        self.step()
+        calls = self.h.net.count(ONLINE)
+        self.h.net.errors[RX] = FeedError("down")
+        self.step(seconds=10, steps=3)
+        self.assertEqual(self.h.manager.state().active_feed, FEED_ONLINE)
+        self.assertEqual(self.h.net.count(ONLINE), calls)
+
+    def test_a_fallback_ends_the_check_and_online_data_takes_over(self):
+        self.step()
+        self.h.net.errors[RX] = FeedError("down")
+        self.step(seconds=10, steps=3)
+        state = self.h.manager.state()
+        self.assertEqual(state.active_feed, FEED_ONLINE)
+        self.assertFalse(state.cross_check_active)
+        self.assertEqual(state.cross_check, ())
+        self.assertEqual(self.h.hexes(), ["c3"])
+
+    def test_the_check_returns_when_the_receiver_does(self):
+        self.h.net.errors[RX] = FeedError("down")
+        self.step(seconds=10, steps=3)
+        del self.h.net.errors[RX]
+        self.step(seconds=10, steps=3)
+        self.assertEqual(self.h.manager.state().active_feed, FEED_RECEIVER)
+        self.assertEqual(self.checked(), ["c3"])
+
+    def test_the_running_threads_include_the_check(self):
+        self.h.manager.start(tick_s=0.01)
+        self.addCleanup(self.h.manager.stop)
+        for _ in range(200):
+            if self.h.net.count(ONLINE):
+                break
+            threading.Event().wait(0.01)
+        self.assertGreater(self.h.net.count(ONLINE), 0)
+
+    def test_a_result_after_the_settings_changed_is_discarded(self):
+        def change(_url):
+            self.h.net.hook = None
+            self.h.manager.update_settings(settings(enabled=False))
+
+        self.h.net.hook = change
+        self.step()
+        self.assertEqual(self.checked(), [])
+
+
 class SettingsChangeTests(unittest.TestCase):
     def test_changing_the_center_polls_at_once(self):
         h = Harness(source_mode="online")

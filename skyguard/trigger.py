@@ -124,6 +124,36 @@ def evaluate_zone(
     )
 
 
+def split_cross_check(receiver_records, online_records):
+    """Which radius judges which aircraft, when the online feed is checking the receiver.
+
+    Returns (records for the receiver radius, records for the online radius). An aircraft
+    the receiver has located belongs to the receiver alone, wherever online data puts it.
+    One it doesn't report, or reports with no position, goes by online data. An online
+    record with no position adds nothing if the receiver already reports that aircraft.
+    """
+    located = {record.hex for record in receiver_records if record.has_position}
+    reported = {record.hex for record in receiver_records}
+    missed = tuple(
+        record
+        for record in online_records
+        if record.hex not in located and (record.has_position or record.hex not in reported)
+    )
+    replaced = {record.hex for record in missed}
+    return tuple(record for record in receiver_records if record.hex not in replaced), missed
+
+
+def merge_zones(first, second):
+    in_zone = first.in_zone + second.in_zone
+    return ZoneResult(
+        first.aircraft + second.aircraft,
+        in_zone,
+        first.no_position_skipped + second.no_position_skipped,
+        _closest(in_zone),
+        first.ground_skipped + second.ground_skipped,
+    )
+
+
 def data_is_fresh(now, last_success_at, last_poll_failed, max_data_age_s):
     """Whether feed data is usable. A max age of 0 means stale on the first failed poll."""
     if last_success_at is None:

@@ -6,6 +6,7 @@ It contains no API key. It does contain the center point, because the map needs 
 import json
 import logging
 
+from .config import FEED_ONLINE, FEED_RECEIVER
 from .feeds.base import GROUND
 from .geo import from_nm
 from .notifier import LOGGER_NAME
@@ -19,7 +20,12 @@ MAX_EVENT_AIRCRAFT = 10
 _logger = logging.getLogger(LOGGER_NAME)
 
 
-def _aircraft_entry(evaluated, settings):
+def _online_only(evaluated, feed):
+    """The receiver is in use and this aircraft came from the online check."""
+    return feed == FEED_RECEIVER and evaluated.record.source.startswith("online")
+
+
+def _aircraft_entry(evaluated, settings, feed):
     record = evaluated.record
     distance = None
     if evaluated.distance_nm is not None:
@@ -38,6 +44,7 @@ def _aircraft_entry(evaluated, settings):
         "in_zone": evaluated.in_zone,
         "ground_ignored": evaluated.ground_ignored,
         "note": evaluated.note,
+        "online_only": _online_only(evaluated, feed),
     }
 
 
@@ -102,7 +109,12 @@ def build_status(
             "online": settings.radius,
             "receiver": settings.radius_receiver,
         },
-        "aircraft": [_aircraft_entry(a, settings) for a in aircraft if _in_display_range(a, radius_nm)],
+        "cross_check_active": feed_state.cross_check_active,
+        "aircraft": [
+            _aircraft_entry(a, settings, feed)
+            for a in aircraft
+            if _in_display_range(a, settings.radius_nm_for(FEED_ONLINE) if _online_only(a, feed) else radius_nm)
+        ],
         "fixtures": [
             {
                 "id": fixture.id,

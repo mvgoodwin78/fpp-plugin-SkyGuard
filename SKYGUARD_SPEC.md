@@ -164,6 +164,14 @@ The query radius is capped at 250 nm. Any 4xx or 429 response counts as a failed
 
 No fallback happens while online requests aren't allowed (plugin disabled or center not set): the active feed stays the receiver and `receiver_lost` still shows. If online becomes allowed with the receiver still down, it falls back at once.
 
+### Online check on a working receiver (Both mode)
+
+The receiver has priority: it stays the active feed, and its radius judges every aircraft it has located, wherever online data puts that aircraft. Decided by the owner on Nov 6, 2026.
+
+- **During a show only**, with online requests allowed, the online feed is polled alongside the receiver, at the normal online rate and never faster than the provider's minimum. Outside a show nothing is sent while the receiver is healthy, because heads only black out during a show. Refusals and `Retry-After` are honored and follow the online feed through a fallback, and never hold up the receiver.
+- **An aircraft the receiver misses** is one in the online data, matched by hex, that the receiver doesn't report or reports with no position. It's judged by the online radius and the same altitude and ground rules, and can cause a blackout. Status marks it `online_only`.
+- **If the check fails**, it never causes a blackout, because the receiver's data is still good. After three intervals with nothing new its data is dropped and `online_check_lost` warns that missed aircraft won't be caught; `online_check_ok` clears it.
+
 ### Second decoder (978 MHz)
 
 - The optional `receiver_978_url` is polled at the normal rate only while the receiver is the active feed. Its aircraft are merged into the receiver's list by hex.
@@ -367,6 +375,7 @@ FPP has no way for a plugin to raise a banner warning: warnings are raised only 
 | `center_unset` / `center_set` | Center missing / provided | Raise / clear warning + log |
 | `radius_unset` / `radius_set` | A required radius is missing / all are entered | Raise / clear warning + log |
 | `personal_use_required` / `personal_use_confirmed` | Enabled and not confirmed / confirmed | Raise / clear warning + log |
+| `online_check_lost` / `online_check_ok` | The online check on a working receiver has delivered nothing new for three intervals during a show / it delivers again, or isn't needed | Raise / clear warning + log. Never a blackout by itself |
 | `ground_aircraft_ignored` | An aircraft in the zone is first skipped as on the ground | Log |
 
 ### Notifier interface
@@ -414,7 +423,7 @@ A `callbacks` script is required so commands live-register on install without an
 
 Served through the template's `api.php` at `/api/plugin/fpp-plugin-SkyGuard/status`, reading a status JSON the daemon rewrites (atomic write in `plugindata/`). It writes at once when the state, reason, enabled setting, show window, active feed, in-zone count or warnings change, and otherwise every 5 s. That matches the 5 s map refresh and spares the SD card a write every second all year.
 
-Fields: `state`, `reason`, `enabled`, `in_schedule`, `source_mode`, `active_feed`, `receiver_ok`, `last_data_age_s`, `aircraft_in_zone`, `center`, `radius`, `aircraft[]` (normalized records with `distance` and `in_zone`), `fixtures[]` (name, resolved channels, valid), `warnings[]`, `notices[]`, `message_test`, `events[]`, `held_channels[]`, `updated_at`. `held_channels` lists the channels being forced right now; FPP has no call that reads an overlay range back, so this is how the page and a test can tell. `events` is the last 20 blackout starts and ends, each with `at`, `type` (`started` or `ended`), `reason` and at most 10 `aircraft`, kept across a daemon restart by reading them back from the status file. `radius` carries the `value` in force for the active feed, its `unit`, and the `online` and `receiver` settings.
+Fields: `state`, `reason`, `enabled`, `in_schedule`, `source_mode`, `cross_check_active`, `active_feed`, `receiver_ok`, `last_data_age_s`, `aircraft_in_zone`, `center`, `radius`, `aircraft[]` (normalized records with `distance` and `in_zone`), `fixtures[]` (name, resolved channels, valid), `warnings[]`, `notices[]`, `message_test`, `events[]`, `held_channels[]`, `updated_at`. `held_channels` lists the channels being forced right now; FPP has no call that reads an overlay range back, so this is how the page and a test can tell. `events` is the last 20 blackout starts and ends, each with `at`, `type` (`started` or `ended`), `reason` and at most 10 `aircraft`, kept across a daemon restart by reading them back from the status file. `radius` carries the `value` in force for the active feed, its `unit`, and the `online` and `receiver` settings.
 
 Each `aircraft[]` record also carries `ground_ignored`, and a `note` of `ground (ignored)` when that is true.
 

@@ -24,7 +24,8 @@ from .matrix import MatrixController
 from .notifier import LOGGER_NAME, LogSink, Notifier, WarningSink
 from .overlay import ChannelResolver, Ledger, OverlayController, blackout_target
 from .status import StatusWriter, build_status, load_events, recent_events
-from .trigger import BLACKOUT, IDLE, Inputs, TriggerEngine, evaluate_zone
+from .config import FEED_ONLINE
+from .trigger import BLACKOUT, IDLE, Inputs, TriggerEngine, evaluate_zone, merge_zones, split_cross_check
 
 ONLINE_LAG_NOTICE = (
     "Online flight data can lag behind real aircraft. Increase your radius by 3 miles to allow for it."
@@ -196,17 +197,25 @@ class Daemon:
         settings = self.settings
         if not settings.center_set or not settings.radius_ready:
             return None
-        return evaluate_zone(
-            feed_state.aircraft,
-            settings.center_lat,
-            settings.center_lon,
-            settings.radius_nm_for(feed_state.active_feed),
-            settings.alt_floor_ft,
-            settings.alt_ceiling_ft,
-            settings.count_no_position,
-            ignore_ground=settings.ignore_ground,
-            ground_speed_limit_kt=settings.ground_speed_limit_kt,
-        )
+
+        def judge(records, radius_nm):
+            return evaluate_zone(
+                records,
+                settings.center_lat,
+                settings.center_lon,
+                radius_nm,
+                settings.alt_floor_ft,
+                settings.alt_ceiling_ft,
+                settings.count_no_position,
+                ignore_ground=settings.ignore_ground,
+                ground_speed_limit_kt=settings.ground_speed_limit_kt,
+            )
+
+        seen, missed = split_cross_check(feed_state.aircraft, feed_state.cross_check)
+        zone = judge(seen, settings.radius_nm_for(feed_state.active_feed))
+        if missed:
+            zone = merge_zones(zone, judge(missed, settings.radius_nm_for(FEED_ONLINE)))
+        return zone
 
     def _log_transition(self, transition):
         aircraft = [record.callsign or record.hex for record in transition.aircraft]

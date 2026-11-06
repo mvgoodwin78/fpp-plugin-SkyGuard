@@ -147,6 +147,9 @@
         box.replaceChildren();
         healthRow(box, 'Active data feed', FEEDS[status.active_feed] || 'None');
         healthRow(box, 'Receiver', receiver);
+        if (status.cross_check_active) {
+            healthRow(box, 'Online check', 'On, for aircraft the receiver misses');
+        }
         healthRow(box, 'Data age', typeof status.last_data_age_s === 'number' ? status.last_data_age_s + ' seconds' : 'No data yet');
         healthRow(box, 'Aircraft in the zone', String(status.aircraft_in_zone || 0));
         healthRow(box, 'Show running', status.in_schedule ? 'Yes' : 'No');

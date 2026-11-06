@@ -67,7 +67,7 @@ function skyGuardCheckbox($title, $setting, $default) {
         <div class="tab-pane fade show active" id="skyGuardTabData" role="tabpanel">
             <?php skyGuardRowOpen('Aircraft data from'); ?>
             <?php skyGuardSelect('Aircraft data from', 'source_mode', 'both', array(
-                'My receiver, with online data as a backup' => 'both',
+                'My receiver, with online data as a check and a backup' => 'both',
                 'My receiver only' => 'receiver',
                 'Online data only (I have no receiver)' => 'online',
             )); ?>
@@ -114,6 +114,7 @@ function skyGuardCheckbox($title, $setting, $default) {
 
                 <p class="text-body-secondary small">
                     With online data, your show's location and search radius go to the provider chosen above.
+                    With your receiver and online data together, that happens during a show even while your receiver is working, to catch aircraft it misses.
                     If the provider has a problem during a show, the heads stay dark until data returns.
                 </p>
             </div>
@@ -152,7 +153,7 @@ function skyGuardCheckbox($title, $setting, $default) {
             </div>
 
             <div data-show-with="online">
-                <?php skyGuardRowOpen('Online radius', '', 'Required. Used while online data is the active feed.'); ?>
+                <?php skyGuardRowOpen('Online radius', '', 'Required. Used while online data is the active feed, and during a show for aircraft your receiver misses.'); ?>
                 <?php skyGuardNumber('radius', 0.01, 99999); ?>
                 <?php skyGuardRowClose(); ?>
             </div>

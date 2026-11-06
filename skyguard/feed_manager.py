@@ -1,5 +1,9 @@
 """Polling, receiver health, fallback and data age. Exactly one feed is active at a time.
 
+In Both mode the online feed also runs alongside a working receiver during a show, as a
+check for aircraft the receiver misses. The receiver is still the active feed: whether it's
+healthy, and how old its data is, doesn't depend on the check.
+
 The poll, health and 978 loops run on separate threads so a dead host, which
 takes a full timeout to fail, can't delay the others. No lock is held during a
 request. A result that arrives after the active feed or settings changed is
@@ -31,6 +35,7 @@ from .trigger import data_is_fresh
 FROZEN_GRACE_S = 3.0  # decoders write about once a second; beyond this, `now` is stuck
 MAX_ONLINE_BACKOFF_S = 30.0
 MIN_978_DATA_AGE_S = 5.0
+CHECK_STALE_POLLS = 3  # the online check's data is dropped after this many intervals with nothing new
 DISPLAY_RANGE_RADII = 2.0
 LOOP_TICK_S = 0.1
 
@@ -46,6 +51,8 @@ class FeedState:
     skipped: int
     last_success_at: float | None
     last_poll_failed: bool
+    cross_check: tuple = ()  # the online feed's aircraft, while it's checking the receiver
+    cross_check_active: bool = False
 
 
 class FeedManager:
@@ -71,6 +78,14 @@ class FeedManager:
         self._last_feed_now = None
         self._last_advance = None
         self._poll_error = None
+
+        self._check_aircraft = ()
+        self._check_at = None
+        self._check_started_at = None
+        self._check_last_attempt = None
+        self._check_last_now = None
+        self._check_4xx_count = 0
+        self._check_retry_not_before = None
 
         self._reset_receiver_tracking()
         self._active = self._choose_active()
@@ -150,18 +165,21 @@ class FeedManager:
             self._fetch,
         )
 
-    def _poll_interval(self):
+    def _online_interval(self, refusals):
         settings = self._settings
-        if self._active == FEED_RECEIVER:
-            return settings.poll_interval_s
         minimum = PROVIDERS[settings.online_provider].min_interval_s
         wanted = settings.poll_interval_s if self._in_schedule else settings.online_idle_interval_s
         interval = max(wanted, minimum)
-        if self._online_4xx_count:
+        if refusals:
             # Repeated refusals can get an address restricted, so back off while refused.
-            backoff = min(interval * 2 ** self._online_4xx_count, MAX_ONLINE_BACKOFF_S)
+            backoff = min(interval * 2 ** refusals, MAX_ONLINE_BACKOFF_S)
             interval = max(interval, backoff)
         return interval
+
+    def _poll_interval(self):
+        if self._active == FEED_RECEIVER:
+            return self._settings.poll_interval_s
+        return self._online_interval(self._online_4xx_count)
 
     # Changes from the daemon ----------------------------------------------------
 
@@ -213,6 +231,15 @@ class FeedManager:
             return
         self._active = new_active
         self._generation += 1
+        # The provider's refusals follow the online feed, whichever role it's in, and never
+        # hold up the receiver.
+        if new_active == FEED_ONLINE:
+            self._online_4xx_count = self._check_4xx_count
+            self._retry_not_before = self._check_retry_not_before
+        else:
+            self._check_4xx_count = self._online_4xx_count
+            self._check_retry_not_before = self._retry_not_before
+            self._retry_not_before = None
         self._force_poll = True
         self._last_feed_now = None
         self._current_feed_failing = False
@@ -246,6 +273,8 @@ class FeedManager:
             generation = self._generation
             on_receiver = self._active == FEED_RECEIVER
             adapter = self._primary_adapter() if on_receiver else self._online_adapter()
+            if not on_receiver:
+                self._check_last_attempt = self._last_attempt
 
         snapshot = error = None
         try:
@@ -317,6 +346,80 @@ class FeedManager:
         else:
             down = self._current_feed_failing and not self.data_fresh(now)
         self._notifier.emit("all_feeds_down" if down else "feeds_restored")
+
+    # The online check on a working receiver, in Both mode during a show ---------
+
+    @property
+    def _check_wanted(self):
+        return (
+            self._settings.source_mode == "both"
+            and bool(self._primary_url)
+            and self._active == FEED_RECEIVER
+            and self._online_allowed
+            and self._in_schedule
+        )
+
+    def _check_stale_after(self):
+        interval = self._online_interval(self._check_4xx_count)
+        return max(self._settings.max_data_age_s, CHECK_STALE_POLLS * interval)
+
+    def _check_fresh(self, now):
+        return self._check_at is not None and now - self._check_at <= self._check_stale_after()
+
+    def _update_check_warning(self, now):
+        since = self._check_at if self._check_at is not None else self._check_started_at
+        lost = self._check_wanted and since is not None and now - since > self._check_stale_after()
+        self._notifier.emit("online_check_lost" if lost else "online_check_ok")
+
+    def _end_check(self):
+        """The attempt time and any refusals stay: they're about the provider, not this show."""
+        self._check_aircraft = ()
+        self._check_at = None
+        self._check_started_at = None
+        self._check_last_now = None
+
+    def poll_check_once(self):
+        """Poll the online feed as a check on the receiver, if due. Returns True if attempted."""
+        with self._lock:
+            now = self._clock()
+            if not self._check_wanted:
+                self._end_check()
+                self._update_check_warning(now)
+                return False
+            if self._check_started_at is None:
+                self._check_started_at = now
+            self._update_check_warning(now)
+            if self._check_retry_not_before is not None and now < self._check_retry_not_before:
+                return False
+            interval = self._online_interval(self._check_4xx_count)
+            if self._check_last_attempt is not None and now - self._check_last_attempt < interval:
+                return False
+            self._check_last_attempt = now
+            generation = self._generation
+            adapter = self._online_adapter()
+
+        snapshot = error = None
+        try:
+            snapshot = adapter.fetch()
+        except FeedError as failure:
+            error = failure
+
+        with self._lock:
+            if generation != self._generation or not self._check_wanted:
+                return True
+            now = self._clock()
+            if error is None:
+                self._check_4xx_count = 0
+                if snapshot.now_s != self._check_last_now:
+                    self._check_last_now = snapshot.now_s
+                    self._check_aircraft = snapshot.aircraft
+                    self._check_at = now
+            elif isinstance(error, FeedHttpError) and 400 <= error.status < 500:
+                self._check_4xx_count += 1
+                if error.retry_after:
+                    self._check_retry_not_before = now + error.retry_after
+            self._update_check_warning(now)
+        return True
 
     # Receiver health, in Both mode ----------------------------------------------
 
@@ -444,6 +547,8 @@ class FeedManager:
                 skipped=self._skipped,
                 last_success_at=self._last_success_at,
                 last_poll_failed=self._last_poll_failed,
+                cross_check=self._check_aircraft if self._check_wanted and self._check_fresh(self._clock()) else (),
+                cross_check_active=self._check_wanted,
             )
 
     # Threads --------------------------------------------------------------------
@@ -459,7 +564,7 @@ class FeedManager:
 
     def start(self, tick_s=LOOP_TICK_S):
         self._stop.clear()
-        for step in (self.poll_once, self.health_once, self.poll_second_once):
+        for step in (self.poll_once, self.health_once, self.poll_second_once, self.poll_check_once):
             thread = threading.Thread(
                 target=self._loop,
                 args=(step, tick_s),

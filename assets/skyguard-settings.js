@@ -769,7 +769,7 @@ function skyGuardSettingSaved(key) {
                 skippable: true,
                 buttons: [
                     { label: 'No, use online data', primary: true, run: function (next) { chooseSource('online', next); } },
-                    { label: 'Yes, with online data as a backup', run: function (next) { chooseSource('both', next); } },
+                    { label: 'Yes, with online data as a check and a backup', run: function (next) { chooseSource('both', next); } },
                     { label: 'Yes, my receiver only', run: function (next) { chooseSource('receiver', next); } }
                 ]
             },

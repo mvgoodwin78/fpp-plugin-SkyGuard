@@ -71,6 +71,7 @@ class Rig:
         self.receiver_now = 0.0
         self.online_now = 0.0
         self.online_requests = 0
+        self.online_aircraft = None  # None means the same aircraft as the receiver sees
         self.settings_doc = {
             "source_mode": "receiver",
             "receiver_url": RECEIVER,
@@ -118,7 +119,8 @@ class Rig:
             if self.online_down:
                 raise FeedError("down")
             self.online_now += 1
-            return {"ac": self.aircraft, "msg": "No error", "now": self.online_now * 1000}
+            aircraft = self.aircraft if self.online_aircraft is None else self.online_aircraft
+            return {"ac": aircraft, "msg": "No error", "now": self.online_now * 1000}
         if self.receiver_down:
             raise FeedError("down")
         self.receiver_now += 1
@@ -142,6 +144,7 @@ class Rig:
             self.daemon.feed.poll_once()
             self.daemon.feed.health_once()
             self.daemon.feed.poll_second_once()
+            self.daemon.feed.poll_check_once()
             self.daemon.step()
             self.daemon.matrix_step()
 
@@ -489,6 +492,108 @@ class StatusForThePageTests(unittest.TestCase):
             self.assertEqual(load_events(self.r.paths.status_file), [], content)
         os.unlink(self.r.paths.status_file)
         self.assertEqual(load_events(self.r.paths.status_file), [])
+
+
+class OnlineCheckTests(unittest.TestCase):
+    """Receiver radius 5 mi, online radius 10 mi, both feeds running during a show."""
+
+    BETWEEN = {"lat": 40.1, "lon": -75.0}  # about 6.9 mi from center: outside 5, inside 10
+    NEAR = {"lat": 40.03, "lon": -75.0}  # about 2.1 mi from center: inside both
+
+    def setUp(self):
+        self.r = Rig(self)
+        self.r.write_settings(source_mode="both", radius="10", radius_receiver="5", radius_unit="mi")
+        self.r.online_aircraft = []
+        self.r.tick(steps=3)
+        self.assertEqual(self.r.state, "CLEAR")
+
+    def feeds(self, receiver, online):
+        self.r.aircraft = receiver
+        self.r.online_aircraft = online
+        self.r.tick(steps=3)
+
+    def test_missed_by_the_receiver_inside_the_online_radius_blacks_out(self):
+        self.feeds([], [plane(self.BETWEEN)])
+        self.assertEqual((self.r.state, self.r.reason), ("BLACKOUT", "aircraft"))
+        entry = self.r.status()["aircraft"][0]
+        self.assertTrue(entry["online_only"])
+        self.assertTrue(entry["in_zone"])
+
+    def test_seen_by_both_outside_the_receiver_radius_does_not_black_out(self):
+        self.feeds([plane(self.BETWEEN)], [plane(self.BETWEEN)])
+        self.assertEqual(self.r.state, "CLEAR")
+        entry = self.r.status()["aircraft"]
+        self.assertEqual(len(entry), 1)
+        self.assertFalse(entry[0]["online_only"])
+
+    def test_the_receivers_position_wins_when_the_two_disagree(self):
+        self.feeds([plane(OUTSIDE)], [plane(self.NEAR)])
+        self.assertEqual(self.r.state, "CLEAR")
+
+    def test_inside_the_receiver_radius_blacks_out_with_no_online_copy(self):
+        self.feeds([plane(self.NEAR)], [])
+        self.assertEqual(self.r.state, "BLACKOUT")
+        self.assertFalse(self.r.status()["aircraft"][0]["online_only"])
+
+    def test_receiver_has_no_position_so_online_data_decides(self):
+        self.r.write_settings(count_no_position="0")
+        self.feeds([plane({})], [plane(self.BETWEEN)])
+        self.assertEqual(self.r.state, "BLACKOUT")
+        self.assertEqual(len(self.r.status()["aircraft"]), 1)
+        self.assertTrue(self.r.status()["aircraft"][0]["online_only"])
+
+    def test_missed_but_outside_the_online_radius_stays_clear(self):
+        self.feeds([], [plane(OUTSIDE)])
+        self.assertEqual(self.r.state, "CLEAR")
+
+    def test_the_altitude_rules_apply_to_missed_aircraft(self):
+        self.r.write_settings(alt_ceiling_ft="1000")
+        self.feeds([], [plane(self.BETWEEN, alt=3000)])
+        self.assertEqual(self.r.state, "CLEAR")
+
+    def test_the_ground_rules_apply_to_missed_aircraft(self):
+        self.r.write_settings(ignore_ground="1")
+        self.feeds([], [plane(self.BETWEEN, alt="ground", gs=5.0)])
+        self.assertEqual(self.r.state, "CLEAR")
+
+    def test_it_releases_after_the_delay_when_the_aircraft_leaves(self):
+        self.feeds([], [plane(self.BETWEEN)])
+        self.assertEqual(self.r.state, "BLACKOUT")
+        self.feeds([], [])
+        self.r.tick(steps=6)
+        self.assertEqual(self.r.state, "CLEAR")
+
+    def test_an_online_outage_does_not_black_out_while_the_receiver_works(self):
+        self.r.online_down = True
+        self.r.tick(steps=15)
+        self.assertEqual(self.r.state, "CLEAR")
+        self.assertTrue(any("Online data" in w for w in self.r.status()["warnings"]))
+
+    def test_a_receiver_outage_still_falls_back_and_goes_by_the_online_radius(self):
+        self.r.receiver_down = True
+        self.r.online_aircraft = [plane(self.BETWEEN)]
+        self.r.tick(seconds=10, steps=4)
+        doc = self.r.status()
+        self.assertEqual(doc["active_feed"], "online")
+        self.assertFalse(doc["aircraft"][0]["online_only"])
+        self.assertEqual(self.r.state, "BLACKOUT")
+
+    def test_outside_a_show_no_online_request_is_made(self):
+        self.r.fpp.status = IDLE_STATUS
+        self.r.tick(seconds=2, steps=2)
+        before = self.r.online_requests
+        self.r.tick(steps=10)
+        self.assertEqual(self.r.online_requests, before)
+
+    def test_a_missed_aircraft_is_listed_even_far_beyond_a_small_receiver_radius(self):
+        self.r.write_settings(radius_receiver="1")
+        self.feeds([], [plane(self.BETWEEN)])
+        self.assertEqual(self.r.state, "BLACKOUT")
+        self.assertEqual([a["hex"] for a in self.r.status()["aircraft"]], ["a1"])
+
+    def test_the_status_says_the_check_is_running(self):
+        self.r.tick()
+        self.assertTrue(self.r.status()["cross_check_active"])
 
 
 class HeadTestTests(unittest.TestCase):
