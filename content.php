@@ -147,6 +147,7 @@ function skyGuardCheckbox($title, $setting, $default) {
 
             <div class="mb-3">
                 <div id="skyGuardLocationMap" class="skyguard-map-area skyguard-map-area-small"></div>
+                <div class="form-text" id="skyGuardLocationMapLegend"></div>
                 <div class="form-text" id="skyGuardLocationMapNote"></div>
             </div>
 

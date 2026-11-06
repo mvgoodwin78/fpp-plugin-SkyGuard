@@ -708,6 +708,7 @@ function skyGuardSettingSaved(key) {
                 locationMap = SkyGuardMap.create({
                     box: byId('skyGuardLocationMap'),
                     note: byId('skyGuardLocationMapNote'),
+                    legend: byId('skyGuardLocationMapLegend'),
                     tiles: SkyGuardMap.usableTiles(value),
                     aircraft: false,
                     units: function () {

@@ -15,9 +15,47 @@
     min-height: 220px;
 }
 
-.skyguard-zone {
+.skyguard-zone-online {
     stroke: var(--bs-danger);
     fill: var(--bs-danger);
+}
+
+.skyguard-zone-receiver {
+    stroke: var(--bs-info);
+    fill: var(--bs-info);
+}
+
+.skyguard-legend-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4em;
+    margin-right: 1em;
+}
+
+.skyguard-swatch {
+    display: inline-block;
+    width: 1.6em;
+    border-top: 3px solid;
+}
+
+.skyguard-swatch-online {
+    border-top-color: var(--bs-danger);
+}
+
+.skyguard-swatch-receiver {
+    border-top-color: var(--bs-info);
+}
+
+.skyguard-swatch-standby {
+    border-top-style: dashed;
+}
+
+/* FPP moves every dialog down and in, to clear its menu bar. This one covers the whole screen. */
+#skyGuardList .modal-dialog {
+    margin: 0;
+    width: 100%;
+    max-width: none;
+    height: 100%;
 }
 
 .skyguard-center-dot {
@@ -82,10 +120,13 @@
 }
 
 .skyguard-radar-zone {
-    fill: var(--bs-danger);
     fill-opacity: 0.12;
-    stroke: var(--bs-danger);
     stroke-width: 0.8;
+}
+
+.skyguard-radar-zone-standby {
+    fill-opacity: 0;
+    stroke-dasharray: 3 3;
 }
 
 .skyguard-radar-axis {

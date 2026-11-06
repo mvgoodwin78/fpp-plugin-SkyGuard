@@ -461,6 +461,9 @@ class StatusForThePageTests(unittest.TestCase):
         self.assertIsInstance(events[0]["at"], (int, float))
         self.assertIsInstance(events[0]["aircraft"], list)
 
+    def test_the_status_says_which_data_sources_are_chosen(self):
+        self.assertEqual(self.read_status()["source_mode"], self.r.daemon.settings.source_mode)
+
     def test_events_are_kept_to_the_last_twenty(self):
         event = {"at": 1, "type": "started", "reason": "aircraft", "aircraft": ["A"]}
         events = []

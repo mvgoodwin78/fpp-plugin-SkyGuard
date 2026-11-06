@@ -612,6 +612,30 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(self.wait_for(self.supervisor_running))
         self.assertTrue(self.wait_for(lambda: os.path.exists(self.paths.status_file)))
 
+    def test_an_update_restarts_a_running_daemon_so_it_runs_the_new_code(self):
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/postStart.sh")
+        self.assertTrue(self.wait_for(self.supervisor_running))
+        with open(self.paths.supervisor_pid_file, encoding="utf-8") as handle:
+            before = handle.read().strip()
+        self.assertEqual(self.run_hook("scripts/fpp_install.sh").returncode, 0)
+
+        def restarted():
+            try:
+                with open(self.paths.supervisor_pid_file, encoding="utf-8") as handle:
+                    return handle.read().strip() not in ("", before)
+            except OSError:
+                return False
+
+        self.assertTrue(self.wait_for(restarted))
+        time.sleep(0.5)
+        self.assertEqual(self.supervisors(), 1)
+
+    def test_a_new_install_does_not_start_the_daemon_itself(self):
+        self.assertEqual(self.run_hook("scripts/fpp_install.sh").returncode, 0)
+        time.sleep(0.5)
+        self.assertEqual(self.supervisors(), 0)
+
     def test_starting_twice_leaves_one_supervisor(self):
         self.run_hook("scripts/fpp_install.sh")
         self.run_hook("scripts/postStart.sh")

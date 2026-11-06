@@ -90,6 +90,7 @@
     /* ---- the pieces of the page ---- */
 
     var units = 'imperial';
+    var staleAfterS = 70;
     var map = null;
     var last = null;
 
@@ -216,8 +217,24 @@
         });
     }
 
+    /* Online data stops while SkyGuard is disabled, and the last aircraft stay in the status.
+       Drawing them would show aircraft that left long ago, so old data means none are shown. */
+    function withoutOldAircraft(status) {
+        var age = status.last_data_age_s;
+        var old = typeof age === 'number' && age > staleAfterS;
+        var note = byId('skyGuardOldData');
+        note.hidden = !old;
+        if (!old) {
+            return status;
+        }
+        note.textContent = 'No aircraft are shown, because the newest data is ' + Math.round(age / 60) +
+            ' minutes old.' + (status.enabled ? '' : ' SkyGuard does not request online data while it is disabled.');
+        return Object.assign({}, status, { aircraft: [], aircraft_in_zone: 0 });
+    }
+
     function refresh() {
-        return request('GET', API + 'status').then(function (status) {
+        return request('GET', API + 'status').then(function (reported) {
+            var status = withoutOldAircraft(reported);
             last = status;
             showState(status);
             showControls(status);
@@ -294,11 +311,14 @@
         }
         setupControls();
         setupList();
-        Promise.all([readSetting('units'), readSetting('map_tile_url'), readSetting('online_provider')]).then(function (results) {
+        Promise.all([readSetting('units'), readSetting('map_tile_url'), readSetting('online_provider'), readSetting('online_idle_interval_s')]).then(function (results) {
             units = results[0] === 'metric' ? 'metric' : 'imperial';
+            /* Two missed polls at the slowest rate in use, outside a show. */
+            staleAfterS = 2 * (parseFloat(results[3]) || 30) + 10;
             map = SkyGuardMap.create({
                 box: byId('skyGuardMap'),
                 note: byId('skyGuardMapNote'),
+                legend: byId('skyGuardMapLegend'),
                 tiles: SkyGuardMap.usableTiles(results[1]),
                 units: function () {
                     return units;

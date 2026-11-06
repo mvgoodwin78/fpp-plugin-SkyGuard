@@ -90,6 +90,7 @@ def build_status(
         "reason": reason,
         "enabled": settings.enabled,
         "in_schedule": in_schedule,
+        "source_mode": settings.source_mode,
         "active_feed": feed_state.active_feed,
         "receiver_ok": feed_state.receiver_ok,
         "last_data_age_s": None if data_age_s is None else round(data_age_s, 1),

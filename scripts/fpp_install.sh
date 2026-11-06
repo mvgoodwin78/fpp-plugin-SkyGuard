@@ -38,3 +38,13 @@ if [ -x "${FPPDIR}/scripts/ManageApacheContentPolicy.sh" ]; then
     "${FPPDIR}/scripts/ManageApacheContentPolicy.sh" add img-src https://tile.openstreetmap.org \
         || echo "SkyGuard could not allow the map tiles, so its pages will show the radar plot."
 fi
+
+# An update has to reach the daemon, and FPP's quick restart doesn't run the stop and start
+# hooks, so it would otherwise keep running the old code until the next full stop or reboot.
+# Only if it's already running: a new install starts it through the lifecycle hook.
+if [ -f "${DATA_DIR}/supervisor.pid" ]; then
+    PLUGIN_DIR="$(dirname "$(dirname "$(readlink -f "$0")")")"
+    export MEDIADIR LOGDIR
+    (cd "${PLUGIN_DIR}" && python3 -m skyguard.supervisor stop) || true
+    /bin/bash "${PLUGIN_DIR}/scripts/skyguard_start.sh" || true
+fi
