@@ -28,6 +28,15 @@ AUTO_DISABLE_WHEN_STOPPED = "Enabled"
 _UNKNOWN = "--"
 PREFERRED_FONTS = ("FreeSansBold", "FreeSans", "Helvetica-Bold", "Helvetica")
 _PLACEHOLDER = re.compile(r"\{(callsign|altitude|speed|distance|heading|count)\}")
+# What a test of the message shows. The settings page previews with the same values.
+SAMPLE_VALUES = {
+    "callsign": "N123AB",
+    "altitude": "3200",
+    "speed": "142",
+    "distance": "4.7",
+    "heading": "270",
+    "count": "2",
+}
 
 _logger = logging.getLogger(LOGGER_NAME)
 
@@ -71,14 +80,16 @@ class MatrixController:
         self._last_attempt = {}  # model -> time of the last request
         self._error_logged = set()
 
-    def update(self, state, reason, closest, count, settings):
-        """Show or clear the message to match the current state."""
+    def update(self, state, reason, closest, count, settings, test_message=False):
+        """Show or clear the message to match the current state. A real message wins over a test."""
         if state != BLACKOUT:
             self._last_closest = None
         elif closest is not None:
             self._last_closest = closest
 
         text = self._message(state, reason, count, settings)
+        if not text and test_message:
+            text = _PLACEHOLDER.sub(lambda match: SAMPLE_VALUES[match.group(1)], settings.matrix_message)
         wanted = settings.matrix_models if text else ()
         for model in wanted:
             self._show(model, text, settings)

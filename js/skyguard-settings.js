@@ -57,8 +57,10 @@ function skyGuardSettingSaved(key) {
         });
     }
 
+    var lastSave = Promise.resolve();
+
     function saveSetting(key, value) {
-        return fetch(API + 'settings/' + encodeURIComponent(key), {
+        lastSave = fetch(API + 'settings/' + encodeURIComponent(key), {
             method: 'PUT',
             credentials: 'same-origin',
             body: String(value)
@@ -67,6 +69,7 @@ function skyGuardSettingSaved(key) {
                 throw new Error('Could not save that setting.');
             }
         });
+        return lastSave;
     }
 
     function readSetting(key) {
@@ -349,7 +352,7 @@ function skyGuardSettingSaved(key) {
 
         var enabled = document.createElement('input');
         enabled.type = 'checkbox';
-        enabled.className = 'form-check-input';
+        enabled.className = 'form-check-input m-0';
         enabled.checked = row.enabled !== false;
         enabled.setAttribute('aria-label', 'On');
         enabled.addEventListener('change', function () {
@@ -477,10 +480,10 @@ function skyGuardSettingSaved(key) {
             }
             models.forEach(function (model, index) {
                 var wrap = document.createElement('div');
-                wrap.className = 'form-check';
+                wrap.className = 'd-flex align-items-center gap-2 mb-1';
                 var input = document.createElement('input');
                 input.type = 'checkbox';
-                input.className = 'form-check-input';
+                input.className = 'form-check-input m-0 flex-shrink-0';
                 input.id = 'skyGuardModel' + index;
                 input.value = model.Name;
                 input.checked = chosen.indexOf(model.Name) !== -1;
@@ -492,7 +495,7 @@ function skyGuardSettingSaved(key) {
                     saveSetting('matrix_models', names.join(',')).catch(showError);
                 });
                 var label = document.createElement('label');
-                label.className = 'form-check-label';
+                label.className = 'form-check-label mb-0';
                 label.htmlFor = input.id;
                 label.textContent = model.Name;
                 wrap.appendChild(input);
@@ -501,6 +504,28 @@ function skyGuardSettingSaved(key) {
             });
         }).catch(function () {
             box.textContent = 'Could not read the overlay models from FPP.';
+        });
+    }
+
+    function setupMessageTest() {
+        byId('skyGuardMatrixTest').addEventListener('click', function () {
+            var message = byId('skyGuardMessage').value;
+            if (!byId('skyGuardModels').querySelector('input:checked')) {
+                toast('Tick at least one panel first.', 'danger');
+            } else if (!message.trim()) {
+                toast('Enter a message first.', 'danger');
+            } else if (hasUnsafeCharacters(message)) {
+                toast('Please leave out double quotes and backslashes.', 'danger');
+            } else {
+                /* Leaving the message box to press this button saves it, so wait for that. */
+                lastSave.catch(function () {
+                    return null;
+                }).then(function () {
+                    return runCommand('SkyGuard Test Message', ['15']);
+                }).then(function () {
+                    toast('Showing the message for 15 seconds.');
+                }).catch(showError);
+            }
         });
     }
 
@@ -700,6 +725,7 @@ function skyGuardSettingSaved(key) {
         setupFreeText('skyGuardNoData', 'matrix_nodata_message');
         setupModels();
         setupColorAndFont();
+        setupMessageTest();
 
         runTest('skyGuardTestReceiver', 'skyGuardTestReceiverResult', API + 'test-receiver',
             urlBody('skyGuardReceiverUrl', 'skyGuardTestReceiverResult'));

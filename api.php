@@ -108,16 +108,17 @@ function fppPluginSkyGuardHeaderIndicator() {
 
     if (!$running) {
         $tooltip = 'SkyGuard is not running, so the heads are not protected.';
-        $color = 'var(--bs-danger)';
+        $color = '#dc3545';
     } else {
         $tooltip = implode(' ', $warnings);
-        $color = 'var(--bs-warning)';
+        $color = '#ffc107';
     }
 
     return json(array(
         'visible' => (!$running || count($warnings) > 0),
         'pluginName' => 'fpp-plugin-SkyGuard',
         'icon' => 'fa-plane',
+        // FPP 10.3 ignores anything but a hex color or a color name here.
         'color' => $color,
         // FPP places this inside an HTML attribute, and warnings can hold fixture names.
         'tooltip' => htmlspecialchars($tooltip, ENT_QUOTES),

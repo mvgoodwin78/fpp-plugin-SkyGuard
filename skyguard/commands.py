@@ -18,7 +18,8 @@ from .overlay import atomic_write_json
 ENABLE = "enable"
 DISABLE = "disable"
 TEST = "test"
-KNOWN_COMMANDS = (ENABLE, DISABLE, TEST)
+TEST_MESSAGE = "test_message"
+KNOWN_COMMANDS = (ENABLE, DISABLE, TEST, TEST_MESSAGE)
 
 DEFAULT_TEST_SECONDS = 10
 MAX_TEST_SECONDS = 3600
@@ -82,7 +83,7 @@ def read_pending(paths, wall_clock=time.time):
         if not isinstance(doc, dict) or doc.get("command") not in KNOWN_COMMANDS:
             _logger.warning("Ignored an unreadable command file.")
             continue
-        if doc["command"] == TEST:
+        if doc["command"] in (TEST, TEST_MESSAGE):
             sent_at = doc.get("at")
             if not isinstance(sent_at, (int, float)) or abs(wall_clock() - sent_at) > TEST_EXPIRY_S:
                 _logger.info("Ignored an expired test command.")

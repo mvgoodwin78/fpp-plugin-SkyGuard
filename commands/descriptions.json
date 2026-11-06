@@ -30,5 +30,20 @@
 				"optional": true
 			}
 		]
+	},
+	{
+		"name": "SkyGuard Test Message",
+		"script": "skyguard_test_message.py",
+		"args": [
+			{
+				"name": "seconds",
+				"description": "Seconds",
+				"type": "int",
+				"min": 1,
+				"max": 3600,
+				"default": "15",
+				"optional": true
+			}
+		]
 	}
 ]

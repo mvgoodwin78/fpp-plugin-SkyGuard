@@ -98,6 +98,7 @@ class Daemon:
         self._skipped_logged = 0
         self._error_active = False
         self._head_test = None  # (fixture id, end time) while one head is being tested
+        self._message_test_until = None  # end time while the panel message is being tested
 
         self._matrix_lock = threading.Lock()
         self._matrix_request = None
@@ -165,6 +166,15 @@ class Daemon:
                 else:
                     _logger.info("Test trigger for %s s", seconds)
                     self.engine.start_test(self._clock(), seconds)
+            elif name == commands.TEST_MESSAGE:
+                # Only touches the panels and sends nothing out, so it works while
+                # disabled, and before the message is switched on, to help set it up.
+                if self.settings.personal_use_confirmed:
+                    seconds = commands.test_seconds(command.get("seconds"))
+                    _logger.info("Test of the panel message for %s s", seconds)
+                    self._message_test_until = self._clock() + seconds
+                else:
+                    _logger.info("Message test ignored because personal use isn't confirmed")
             else:
                 self._pending_enabled = name == commands.ENABLE
                 _logger.info("SkyGuard %s command received", name)
@@ -330,8 +340,17 @@ class Daemon:
 
     # The matrix, on its own thread ----------------------------------------------
 
+    def _message_test_running(self):
+        if self._message_test_until is None:
+            return False
+        if self._clock() >= self._message_test_until or not self.settings.personal_use_confirmed:
+            self._message_test_until = None
+            return False
+        return True
+
     def _request_matrix(self, zone, in_zone):
         closest = zone.closest if zone else None
+        test_message = self._message_test_running()
         with self._matrix_lock:
             self._matrix_request = (
                 self.engine.state,
@@ -339,6 +358,7 @@ class Daemon:
                 closest,
                 len(in_zone),
                 self.settings,
+                test_message,
             )
 
     def matrix_step(self):

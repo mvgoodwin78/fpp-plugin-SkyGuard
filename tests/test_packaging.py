@@ -12,6 +12,7 @@ import time
 import unittest
 
 from skyguard.config import Paths, Settings
+from skyguard.matrix import SAMPLE_VALUES
 from skyguard.feeds.online_adsbx_v2 import PROVIDERS
 from skyguard.fpp_api import FppApi
 from skyguard.overlay import Ledger, OverlayController
@@ -23,7 +24,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = "fpp-plugin-SkyGuard"
 HOOKS = ("fpp_install.sh", "fpp_uninstall.sh", "postStart.sh", "preStop.sh")
 SHELL_SCRIPTS = ("callbacks", *(f"scripts/{n}" for n in (*HOOKS, "skyguard_start.sh")))
-COMMAND_SCRIPTS = ("skyguard_enable.py", "skyguard_disable.py", "skyguard_test.py")
+COMMAND_SCRIPTS = ("skyguard_enable.py", "skyguard_disable.py", "skyguard_test.py", "skyguard_test_message.py")
 EXECUTABLE = (*SHELL_SCRIPTS, *(f"commands/{n}" for n in COMMAND_SCRIPTS))
 
 
@@ -102,12 +103,16 @@ class CommandTests(unittest.TestCase):
         commands = load("commands/descriptions.json")
         self.assertEqual(
             [c["name"] for c in commands],
-            ["SkyGuard Enable", "SkyGuard Disable", "SkyGuard Test Trigger"],
+            ["SkyGuard Enable", "SkyGuard Disable", "SkyGuard Test Trigger", "SkyGuard Test Message"],
         )
         for command in commands:
             self.assertTrue(os.path.exists(os.path.join(ROOT, "commands", command["script"])))
 
-    def test_only_the_test_trigger_takes_an_argument(self):
+    def test_the_message_test_script_sends_its_command(self):
+        doc = self.run_script("skyguard_test_message.py", "15")
+        self.assertEqual((doc["command"], doc["seconds"]), ("test_message", "15"))
+
+    def test_only_the_test_commands_take_an_argument(self):
         commands = {c["name"]: c for c in load("commands/descriptions.json")}
         self.assertEqual(commands["SkyGuard Enable"]["args"], [])
         self.assertEqual(commands["SkyGuard Disable"]["args"], [])
@@ -371,6 +376,18 @@ class PhpTests(unittest.TestCase):
                                    ("ground_speed_limit_kt", 5, 100), ("matrix_size", 4, 100),
                                    ("matrix_speed", 0, 200)):
             self.assertIn(f"skyGuardNumber('{setting}', {low}, {high}", page)
+
+    def test_the_preview_and_the_panel_test_use_the_same_samples(self):
+        script = read("js/skyguard-settings.js")
+        block = script.split("var PLACEHOLDERS = {")[1].split("}")[0]
+        shown = dict(re.findall(r"(\w+): '([^']*)'", block))
+        self.assertEqual(shown, SAMPLE_VALUES)
+
+    def test_the_header_color_is_one_fpp_accepts(self):
+        colors = re.findall(r"\$color = '([^']*)'", self.api)
+        self.assertEqual(len(colors), 2)
+        for color in colors:
+            self.assertRegex(color, r"^#[0-9a-fA-F]{3,8}$|^[a-zA-Z]+$")
 
     def test_the_personal_use_step_has_no_skip(self):
         script = read("js/skyguard-settings.js")

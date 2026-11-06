@@ -510,6 +510,94 @@ class HeadTestTests(unittest.TestCase):
         self.assertEqual(self.r.status()["fixtures"][1]["problem"], "Incomplete")
 
 
+class MessageTestTests(unittest.TestCase):
+    def setUp(self):
+        self.r = Rig(self)
+        self.r.fpp.add_model("Panel")
+        self.r.write_settings(
+            matrix_enabled=0,
+            matrix_models="Panel",
+            matrix_position="Center",
+            matrix_message="{callsign} {count}",
+        )
+        self.r.tick()
+
+    def panel(self):
+        return self.r.fpp.models["Panel"]
+
+    def send(self, seconds=5):
+        commands.send_command(self.r.paths, commands.TEST_MESSAGE, seconds)
+        self.r.wall = time.time()
+
+    def test_it_shows_sample_values_then_clears_and_restores_the_panel(self):
+        self.send()
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertEqual(self.panel()["effect"], "N123AB 2")
+        self.assertEqual(self.panel()["state"], 1)
+        self.r.tick(REFRESH_INTERVAL_S, steps=3)
+        self.assertIsNone(self.panel()["effect"])
+        self.assertEqual(self.panel()["state"], 0)
+        self.assertEqual(self.r.daemon.ledger.matrix, {})
+
+    def test_the_heads_are_not_touched(self):
+        self.send()
+        self.r.tick()
+        self.assertEqual(self.r.fpp.ranges, {})
+        self.assertEqual(self.r.state, "CLEAR")
+
+    def test_it_works_while_disabled(self):
+        self.r.write_settings(enabled=0)
+        self.r.tick()
+        self.send()
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertEqual(self.panel()["effect"], "N123AB 2")
+
+    def test_it_needs_the_confirmation(self):
+        self.r.write_settings(personal_use_confirmed=0)
+        self.r.tick()
+        self.send()
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertIsNone(self.panel()["effect"])
+
+    def test_a_request_made_before_confirming_does_not_fire_after(self):
+        self.r.write_settings(personal_use_confirmed=0)
+        self.r.tick()
+        self.send(60)
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.r.write_settings(personal_use_confirmed=1)
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertIsNone(self.panel()["effect"])
+
+    def test_withdrawing_the_confirmation_ends_it(self):
+        self.send(60)
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertEqual(self.panel()["effect"], "N123AB 2")
+        self.r.write_settings(personal_use_confirmed=0)
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertIsNone(self.panel()["effect"])
+
+    def test_a_real_message_wins(self):
+        self.r.write_settings(matrix_enabled=1)
+        self.r.tick()
+        self.send(60)
+        self.r.aircraft = [plane(flight="REAL1 ")]
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertEqual(self.panel()["effect"], "REAL1 1")
+
+    def test_no_panels_means_nothing_is_sent(self):
+        self.r.write_settings(matrix_models="")
+        self.r.tick()
+        self.send()
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertEqual(self.r.fpp.commands, [])
+
+    def test_an_old_request_does_not_fire(self):
+        commands.send_command(self.r.paths, commands.TEST_MESSAGE, 5)
+        self.r.wall = time.time() + 120
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertIsNone(self.panel()["effect"])
+
+
 class NoFixturesWarningTests(unittest.TestCase):
     def setUp(self):
         self.r = Rig(self)
