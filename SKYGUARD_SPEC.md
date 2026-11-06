@@ -391,7 +391,7 @@ The main loop never stops on an unexpected error. It logs the error and raises `
 
 The channel ranges are applied before anything slower in each step, and the matrix runs on its own thread, so a slow panel call can't delay a blackout.
 
-The header indicator is served from `api.php` at `/api/plugin/fpp-plugin-SkyGuard/headerIndicator`, which FPP calls with a 1 s timeout on its status updates, so it must only read the status file. It returns `visible`, `icon`, `color` (a hex color, because FPP 10.3 ignores anything but a hex color or a color name), `tooltip`, `link` and `animate`. The icon appears only when a warning is active or the status file is stale. Header indicators exist on 9.5 and master but haven't been tested on a box yet.
+The header indicator is served from `api.php` at `/api/plugin/fpp-plugin-SkyGuard/headerIndicator`, which FPP calls with a 1 s timeout on its status updates, so it must only read the status file. It returns `visible`, `icon`, `color` (a hex color, because FPP 10.3 ignores anything but a hex color or a color name), `tooltip`, `link` and `animate`. The icon is always shown, and its text starts by saying SkyGuard is ON, OFF or NOT RUNNING (owner's request, Nov 6, 2026). Green: on, nothing wrong. Yellow: off, waiting on setup, or a warning. Red: blacked out or not running. FPP sets the text with `.attr` on 10.x and writes it into an attribute unescaped on 9.5, so the text leaves out `" < > &` and uses a typographic apostrophe instead of escaping. FPP refreshes it on its own schedule, measured at 22–29 s on 10.3. Header indicators exist on 9.5 and master but haven't been tested on a box yet.
 
 ## FPP commands and status API
 
@@ -672,7 +672,7 @@ Phase 1 is done when every test below passes on a Pi 4 running FPP 9.5 and on cu
 - [ ] A required radius not entered: IDLE with reason `no_radius` and a warning, and no online requests; entering it starts protection without a restart
 - [ ] First-run: on every setup the plugin stays IDLE with a warning until personal use is confirmed, then starts without a restart; the lag notice shows whenever online data is selected
 - [ ] A USB DMX head using `start_channel` blacks out correctly
-- [ ] Header indicator appears on a warning and when the daemon is stopped, and clears afterwards
+- [ ] Header indicator always shows, says ON, OFF or NOT RUNNING, and adds any warnings
 - [ ] Install and uninstall each run twice cleanly; only one log file exists
 - [ ] fpp-data plugin check: no Blocker or Best-practice findings
 

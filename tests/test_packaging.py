@@ -262,9 +262,6 @@ class PhpTests(unittest.TestCase):
             path = re.sub(r":(\w+)", r"{\1}", endpoint)
             self.assertIn(method.lower(), paths[f"/api/plugin/{REPO}/{path}"], endpoint)
 
-    def test_the_tooltip_is_escaped_for_the_attribute_fpp_puts_it_in(self):
-        self.assertIn("htmlspecialchars($tooltip, ENT_QUOTES)", self.api)
-
     def test_the_lookup_has_time_limits_and_identifies_itself(self):
         for option in ("CURLOPT_CONNECTTIMEOUT", "CURLOPT_TIMEOUT", "CURLOPT_USERAGENT"):
             self.assertIn(option, self.api)
@@ -431,10 +428,25 @@ class PhpTests(unittest.TestCase):
         self.assertEqual(shown, SAMPLE_VALUES)
 
     def test_the_header_color_is_one_fpp_accepts(self):
-        colors = re.findall(r"\$color = '([^']*)'", self.api)
-        self.assertEqual(len(colors), 2)
+        colors = re.findall(r"\$(?:green|yellow|red) = '([^']*)'", self.api)
+        self.assertEqual(len(colors), 3)
         for color in colors:
             self.assertRegex(color, r"^#[0-9a-fA-F]{3,8}$|^[a-zA-Z]+$")
+
+    def test_the_header_icon_always_shows_and_always_says_on_or_off(self):
+        body = self.api.split("function fppPluginSkyGuardHeaderIndicator()")[1].split("\n}\n")[0]
+        self.assertIn("'visible' => true", body)
+        for words in ("SkyGuard is OFF", "SkyGuard is ON", "SkyGuard is NOT RUNNING", "empty($doc['enabled'])"):
+            self.assertIn(words, body)
+
+    def test_the_header_text_needs_no_escaping_on_either_fpp_version(self):
+        body = self.api.split("function fppPluginSkyGuardHeaderIndicator()")[1].split("\n}\n")[0]
+        self.assertNotIn("htmlspecialchars", body)
+        self.assertIn("fppPluginSkyGuardIndicatorText($tooltip)", body)
+        helper = self.api.split("function fppPluginSkyGuardIndicatorText($text)")[1].split("\n}\n")[0]
+        self.assertIn("chr(39)", helper)
+        for character in ("chr(34)", "'<'", "'>'", "'&'"):
+            self.assertIn(character, helper)
 
     def test_the_personal_use_step_has_no_skip(self):
         script = read("assets/skyguard-settings.js")

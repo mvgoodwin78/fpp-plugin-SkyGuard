@@ -99,29 +99,70 @@ function fppPluginSkyGuardStatus() {
     return json($doc);
 }
 
+// Text for the header icon. FPP 10 sets it as text and FPP 9.5 writes it into an HTML
+// attribute unescaped, so escaping shows as codes on one and is needed on the other.
+// Leaving out the characters that matter is right on both.
+function fppPluginSkyGuardIndicatorText($text) {
+    $text = str_replace(array(chr(34), '<', '>', '&'), '', $text);
+    return str_replace(chr(39), chr(0xE2) . chr(0x80) . chr(0x99), $text);
+}
+
 // GET /api/plugin/fpp-plugin-SkyGuard/headerIndicator
 // FPP calls this with a 1 s timeout on its status updates, so it only reads the status file.
+// Always shown, so hovering always says whether SkyGuard is on or off.
 function fppPluginSkyGuardHeaderIndicator() {
     $doc = fppPluginSkyGuardReadStatus();
     $running = fppPluginSkyGuardIsRunning($doc);
-    $warnings = ($running && isset($doc['warnings']) && is_array($doc['warnings'])) ? $doc['warnings'] : array();
+    $warnings = array();
+    if ($running && isset($doc['warnings']) && is_array($doc['warnings'])) {
+        foreach ($doc['warnings'] as $warning) {
+            // The first words of the text already say this.
+            if (strpos($warning, 'SkyGuard is disabled') !== 0) {
+                $warnings[] = $warning;
+            }
+        }
+    }
+    $state = isset($doc['state']) ? $doc['state'] : '';
+    $reason = isset($doc['reason']) ? $doc['reason'] : '';
+
+    $green = '#198754';
+    $yellow = '#ffc107';
+    $red = '#dc3545';
 
     if (!$running) {
-        $tooltip = 'SkyGuard is not running, so the heads are not protected.';
-        $color = '#dc3545';
+        $tooltip = 'SkyGuard is NOT RUNNING, so the heads are not protected.';
+        $color = $red;
+    } elseif (empty($doc['enabled'])) {
+        $tooltip = 'SkyGuard is OFF, so the heads are not protected.';
+        $color = $yellow;
+    } elseif ($state === 'BLACKOUT') {
+        $tooltip = 'SkyGuard is ON. The heads are blacked out.';
+        $color = $red;
+    } elseif ($state === 'CLEAR') {
+        $tooltip = 'SkyGuard is ON. No aircraft are in the zone.';
+        $color = $green;
+    } elseif ($reason === 'schedule') {
+        $tooltip = 'SkyGuard is ON. No show is running.';
+        $color = $green;
     } else {
-        $tooltip = implode(' ', $warnings);
-        $color = '#ffc107';
+        $tooltip = 'SkyGuard is ON, but is waiting for its setup to finish.';
+        $color = $yellow;
+    }
+
+    if (count($warnings) > 0) {
+        $tooltip .= ' ' . implode(' ', $warnings);
+        if ($color === $green) {
+            $color = $yellow;
+        }
     }
 
     return json(array(
-        'visible' => (!$running || count($warnings) > 0),
+        'visible' => true,
         'pluginName' => 'fpp-plugin-SkyGuard',
         'icon' => 'fa-plane',
         // FPP 10.3 ignores anything but a hex color or a color name here.
         'color' => $color,
-        // FPP places this inside an HTML attribute, and warnings can hold fixture names.
-        'tooltip' => htmlspecialchars($tooltip, ENT_QUOTES),
+        'tooltip' => fppPluginSkyGuardIndicatorText($tooltip),
         'link' => 'plugin.php?plugin=fpp-plugin-SkyGuard&page=status.php',
     ));
 }
