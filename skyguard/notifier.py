@@ -24,6 +24,7 @@ _WARNING_MESSAGES = {
     "supervisor_lost": "SkyGuard's supervisor stopped, so nothing will restart it if it crashes. Restart FPPD to fix this.",
     "internal_error": "SkyGuard hit an unexpected error. During a show, the heads are held dark. See the plugin log.",
     "center_unset": "Set a center point. SkyGuard stays idle until you do.",
+    "no_fixtures": "No moving heads are set up, so a blackout has nothing to black out.",
     "radius_unset": "Enter a radius for each data source in use. SkyGuard stays idle until you do.",
     "personal_use_required": "SkyGuard is for personal use only. It stays idle until you confirm this in its setup.",
 }
@@ -36,6 +37,7 @@ _RAISES = {
     "all_feeds_down": "all_feeds_down",
     "plugin_disabled": "plugin_disabled",
     "center_unset": "center_unset",
+    "no_fixtures": "no_fixtures",
     "radius_unset": "radius_unset",
     "personal_use_required": "personal_use_required",
     "overlay_failed": "overlay_failed",
@@ -51,6 +53,7 @@ _CLEARS = {
     "feeds_restored": ("all_feeds_down",),
     "plugin_enabled": ("plugin_disabled",),
     "center_set": ("center_unset",),
+    "fixtures_set": ("no_fixtures",),
     "radius_set": ("radius_unset",),
     "personal_use_confirmed": ("personal_use_required",),
     "overlay_restored": ("overlay_failed",),

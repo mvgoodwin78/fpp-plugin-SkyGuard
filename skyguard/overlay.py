@@ -182,6 +182,7 @@ class ResolvedFixture:
     valid: bool
     problem: str | None
     channels: tuple  # (fpp channel, value, "dimmer" or "shutter")
+    id: str = ""
 
 
 def universe_entries(doc):
@@ -251,10 +252,10 @@ def resolve_fixtures(fixtures, universe_doc):
     resolved = []
     for fixture in fixtures:
         if not fixture.complete:
-            resolved.append(ResolvedFixture(fixture.name, False, "Incomplete", ()))
+            resolved.append(ResolvedFixture(fixture.name, False, "Incomplete", (), fixture.id))
             continue
         if not fixture.enabled:
-            resolved.append(ResolvedFixture(fixture.name, True, None, ()))
+            resolved.append(ResolvedFixture(fixture.name, True, None, (), fixture.id))
             continue
         channels, problem = _fixture_channels(fixture, entries)
         kept = []
@@ -264,7 +265,7 @@ def resolve_fixtures(fixtures, universe_doc):
                 continue
             claimed[channel] = value
             kept.append((channel, value, role))
-        resolved.append(ResolvedFixture(fixture.name, problem is None, problem, tuple(kept)))
+        resolved.append(ResolvedFixture(fixture.name, problem is None, problem, tuple(kept), fixture.id))
     return tuple(resolved)
 
 

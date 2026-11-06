@@ -79,6 +79,7 @@ def build_status(
         "aircraft": [_aircraft_entry(a, settings) for a in aircraft if _in_display_range(a, radius_nm)],
         "fixtures": [
             {
+                "id": fixture.id,
                 "name": fixture.name,
                 "channels": [
                     {"channel": channel, "value": value, "role": role}
@@ -114,6 +115,7 @@ class StatusWriter:
             doc["active_feed"],
             doc["aircraft_in_zone"],
             tuple(doc["warnings"]),
+            tuple((f["id"], f["name"], f["valid"], f["problem"]) for f in doc["fixtures"]),
         )
 
     def write(self, doc):

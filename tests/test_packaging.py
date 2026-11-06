@@ -11,7 +11,7 @@ import tempfile
 import time
 import unittest
 
-from skyguard.config import Paths
+from skyguard.config import Paths, Settings
 from skyguard.feeds.online_adsbx_v2 import PROVIDERS
 from skyguard.fpp_api import FppApi
 from skyguard.overlay import Ledger, OverlayController
@@ -113,6 +113,8 @@ class CommandTests(unittest.TestCase):
         self.assertEqual(commands["SkyGuard Disable"]["args"], [])
         argument = commands["SkyGuard Test Trigger"]["args"][0]
         self.assertEqual((argument["min"], argument["max"], argument["default"]), (1, 3600, "10"))
+        fixture = commands["SkyGuard Test Trigger"]["args"][1]
+        self.assertEqual((fixture["name"], fixture["optional"]), ("fixture", True))
 
     def test_scripts_use_an_absolute_python_path(self):
         # FPP runs them with no PATH in the environment.
@@ -149,6 +151,13 @@ class CommandTests(unittest.TestCase):
     def test_test_script_passes_the_seconds(self):
         doc = self.run_script("skyguard_test.py", "25")
         self.assertEqual((doc["command"], doc["seconds"]), ("test", "25"))
+
+    def test_test_script_passes_the_fixture(self):
+        doc = self.run_script("skyguard_test.py", "3", "abc")
+        self.assertEqual((doc["seconds"], doc["fixture"]), ("3", "abc"))
+
+    def test_test_script_treats_an_empty_fixture_as_all_heads(self):
+        self.assertNotIn("fixture", self.run_script("skyguard_test.py", "3", ""))
 
     def test_test_script_without_seconds_uses_the_default_later(self):
         self.assertNotIn("seconds", self.run_script("skyguard_test.py"))
@@ -230,15 +239,17 @@ class PhpTests(unittest.TestCase):
         self.assertEqual(outside, [])
 
     def test_balanced_braces_and_parentheses(self):
-        code = re.sub(r"'(?:[^'\\]|\\.)*'", "''", self.api)
-        code = re.sub(r"//[^\n]*", "", code)
+        code = re.sub(r"//[^\n]*|'(?:[^'\\]|\\.)*'", "''", self.api)
         for opening, closing in ("{}", "()", "[]"):
             self.assertEqual(code.count(opening), code.count(closing), opening)
 
     def test_every_route_is_documented(self):
         paths = load("apiDocs.json")["paths"]
-        for endpoint in re.findall(r"'endpoint' => '(\w+)'", self.api):
-            self.assertIn(f"/api/plugin/{REPO}/{endpoint}", paths)
+        routes = re.findall(r"'method' => '(\w+)', 'endpoint' => '([^']+)'", self.api)
+        self.assertGreater(len(routes), 10)
+        for method, endpoint in routes:
+            path = re.sub(r":(\w+)", r"{\1}", endpoint)
+            self.assertIn(method.lower(), paths[f"/api/plugin/{REPO}/{path}"], endpoint)
 
     def test_the_tooltip_is_escaped_for_the_attribute_fpp_puts_it_in(self):
         self.assertIn("htmlspecialchars($tooltip, ENT_QUOTES)", self.api)
@@ -251,8 +262,120 @@ class PhpTests(unittest.TestCase):
         self.assertNotIn("error_log", self.api)
         self.assertNotIn("file_put_contents($logFile", self.api)
 
-    def test_status_never_touches_the_private_file(self):
-        self.assertNotIn("private.json", self.api)
+    def test_the_api_key_is_never_returned_or_logged(self):
+        self.assertNotIn("error_log", self.api)
+        body = self.api.split("function fppPluginSkyGuardPrivateGet(")[1].split("\n}\n")[0]
+        self.assertIn("'api_key_set' => !empty($doc['online_api_key'])", body)
+        self.assertNotIn("online_api_key", body.replace("!empty($doc['online_api_key'])", ""))
+        self.assertNotIn("json($doc)", body)
+
+    def test_the_private_file_is_kept_private(self):
+        self.assertIn("0600", self.api)
+
+    def test_every_write_needs_a_json_request(self):
+        # A page on another site can't send this without a preflight FPP doesn't allow.
+        self.assertIn("application/json", self.api)
+        for name in ("PrivatePut", "FixtureAdd", "FixtureUpdate", "TestReceiver", "TestOnline"):
+            body = self.api.split(f"function fppPluginSkyGuard{name}(")[1].split("\nfunction ")[0]
+            self.assertIn("fppPluginSkyGuardJsonBody()", body, name)
+
+    def test_the_receiver_test_only_allows_http_and_follows_no_redirects(self):
+        body = self.api.split("function fppPluginSkyGuardTestReceiver(")[1].split("\nfunction ")[0]
+        self.assertIn("'http'", body)
+        fetch = self.api.split("function fppPluginSkyGuardFetchForTest(")[1].split("\nfunction ")[0]
+        self.assertIn("CURLOPT_FOLLOWLOCATION, false", fetch)
+        self.assertIn("CURLOPT_TIMEOUT", fetch)
+
+    def test_online_providers_match_the_python_list(self):
+        for name, provider in PROVIDERS.items():
+            self.assertIn(f"'{name}'", self.api)
+            expected = provider.url_template.format(lat="%s", lon="%s", nm=5)
+            self.assertIn(f"'{name}' => '{expected}'", self.api)
+
+    def test_writes_are_atomic_and_locked(self):
+        self.assertIn("rename(", self.api)
+        self.assertIn("flock(", self.api)
+
+    def test_settings_page_loads_its_script_from_a_name_fpp_serves(self):
+        for name in os.listdir(os.path.join(ROOT, "js")):
+            self.assertRegex(name, r"^[A-Za-z0-9_.-]+$")
+
+    def test_pages_have_no_hard_coded_colors(self):
+        for name in ("content.php", "status.php", "about.php"):
+            text = read(name)
+            self.assertIsNone(re.search(r"#[0-9a-fA-F]{3,8}\b(?!\w)|\brgb\(|style=\"[^\"]*color", text), name)
+        script = read("js/skyguard-settings.js")
+        self.assertIsNone(re.search(r"style\.(?:color|background)", script))
+
+    def test_no_external_loads(self):
+        for name in ("content.php", "js/skyguard-settings.js"):
+            self.assertIsNone(re.search(r"<script[^>]+src=|<link[^>]+href=", read(name)), name)
+
+    def test_script_uses_no_jquery_helpers_removed_in_jquery_4(self):
+        script = read("js/skyguard-settings.js")
+        for removed in ("$.trim", "$.isArray", "$.isFunction", ".size()"):
+            self.assertNotIn(removed, script)
+
+    def test_a_json_header_is_only_sent_with_a_body(self):
+        script = read("js/skyguard-settings.js")
+        self.assertEqual(script.count("application/json"), 1)
+        self.assertIn("options.body = JSON.stringify(body)", script)
+
+    def test_script_writes_text_with_textcontent_not_html(self):
+        script = read("js/skyguard-settings.js")
+        self.assertNotIn("innerHTML", script)
+        self.assertNotIn(".html(", script)
+
+    def test_quotes_are_refused_in_free_text(self):
+        # FPP 9.5 writes settings into an inline script without escaping them.
+        self.assertIn("hasUnsafeCharacters", read("js/skyguard-settings.js"))
+
+    def test_every_setting_on_the_page_is_one_the_daemon_knows(self):
+        known = set(Settings.__dataclass_fields__) | {"units", "setup_state"}
+        page = read("content.php") + read("js/skyguard-settings.js")
+        names = set(re.findall(r"skyGuardNumber\('(\w+)'", page))
+        names |= set(re.findall(r"skyGuard(?:Select|Checkbox)\('[^']*', '(\w+)'", page))
+        names |= set(re.findall(r"data-(?:setting|free-text)=\"(\w+)\"", page))
+        names |= set(re.findall(r"saveSetting\('(\w+)'", page))
+        self.assertGreater(len(names), 15)
+        self.assertEqual(names - known, set())
+
+    def test_the_defaults_shown_are_the_daemons_defaults(self):
+        defaults = Settings()
+        page = read("content.php")
+        shown = re.findall(r"skyGuardNumber\('(\w+)', [-\d.]+, [-\d.]+, '([^']*)'\)", page)
+        self.assertGreater(len(shown), 8)
+        for name, value in shown:
+            self.assertEqual(float(value), float(getattr(defaults, name)), name)
+        checks = re.findall(r"skyGuardCheckbox\('[^']*', '(\w+)', (\d)\)", page)
+        self.assertGreater(len(checks), 2)
+        for name, value in checks:
+            self.assertEqual(bool(int(value)), getattr(defaults, name), name)
+        selects = re.findall(r"skyGuardSelect\('[^']*', '(\w+)', '([^']*)'", page)
+        for name, value in selects:
+            if name != "units":
+                self.assertEqual(value, getattr(defaults, name), name)
+
+    def test_the_radius_fields_have_no_default(self):
+        page = read("content.php")
+        self.assertIn("skyGuardNumber('radius', 0.01, 99999)", page)
+        self.assertIn("skyGuardNumber('radius_receiver', 0.01, 99999)", page)
+
+    def test_rows_without_an_id_get_one(self):
+        body = self.api.split("function fppPluginSkyGuardFixtureList(")[1].split("\nfunction ")[0]
+        self.assertIn("random_bytes", body)
+
+    def test_the_limits_shown_match_the_daemon(self):
+        page = read("content.php")
+        for setting, low, high in (("poll_interval_s", 1, 2), ("online_idle_interval_s", 5, 300),
+                                   ("ground_speed_limit_kt", 5, 100), ("matrix_size", 4, 100),
+                                   ("matrix_speed", 0, 200)):
+            self.assertIn(f"skyGuardNumber('{setting}', {low}, {high}", page)
+
+    def test_the_personal_use_step_has_no_skip(self):
+        script = read("js/skyguard-settings.js")
+        self.assertIn("personal_use_confirmed", script)
+        self.assertIn("step.skippable", script)
 
     def test_menu_has_at_most_one_entry_per_type(self):
         types = re.findall(r"'type' => '(\w+)'", read("menu.inc"))

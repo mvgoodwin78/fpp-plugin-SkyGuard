@@ -29,13 +29,15 @@ MAX_COMMAND_BYTES = 4096
 _logger = logging.getLogger(LOGGER_NAME)
 
 
-def send_command(paths, name, seconds=None):
+def send_command(paths, name, seconds=None, fixture=None):
     """Queue a command for the daemon. Returns quickly."""
     if name not in KNOWN_COMMANDS:
         raise ValueError(f"unknown command: {name}")
     doc = {"command": name, "at": time.time()}
     if seconds is not None:
         doc["seconds"] = seconds
+    if fixture:
+        doc["fixture"] = fixture
     # Time first, so sorting by name is the order they were sent.
     filename = f"{time.time_ns():020d}-{uuid.uuid4().hex}.json"
     atomic_write_json(os.path.join(paths.commands_dir, filename), doc)

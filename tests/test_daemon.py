@@ -426,6 +426,133 @@ class ScheduleAcceptanceTests(unittest.TestCase):
         self.assertTrue(any("center point" in w for w in self.r.status()["warnings"]))
 
 
+class HeadTestTests(unittest.TestCase):
+    def setUp(self):
+        self.r = Rig(self)
+        self.r.write_fixtures([{**HEAD_A, "id": "aaa"}, {**HEAD_B, "id": "bbb"}])
+        self.r.tick()
+
+    def send(self, seconds, fixture):
+        commands.send_command(self.r.paths, commands.TEST, seconds, fixture)
+        self.r.wall = time.time()
+
+    def test_only_that_head_goes_dark_for_the_time_given(self):
+        self.send(3, "aaa")
+        self.r.tick()
+        self.assertEqual(self.r.fpp.output(A_DIMMER), 0)
+        self.assertEqual(self.r.fpp.output(A_SHUTTER), 8)
+        self.assertEqual(self.r.fpp.output(B_DIMMER), 100)
+        self.assertEqual(self.r.state, "CLEAR")
+        self.r.tick(steps=2)
+        self.assertEqual(self.r.fpp.output(A_DIMMER), 0)
+        self.r.tick()
+        self.assertEqual(self.r.fpp.output(A_DIMMER), 100)
+        self.assertEqual(self.r.fpp.ever_full_on, [])
+
+    def test_it_works_outside_a_show(self):
+        self.r.fpp.status = IDLE_STATUS
+        self.r.tick()
+        self.send(3, "bbb")
+        self.r.tick()
+        self.assertEqual(self.r.state, "IDLE")
+        self.assertEqual(self.r.fpp.output(B_DIMMER), 0)
+        self.assertEqual(self.r.fpp.output(A_DIMMER), 100)
+
+    def test_an_unknown_fixture_does_nothing(self):
+        self.send(3, "nope")
+        self.r.tick()
+        self.assertEqual(self.r.fpp.ranges, {})
+
+    def test_it_does_not_cut_a_real_blackout_short(self):
+        self.r.aircraft = [plane()]
+        self.r.tick()
+        self.send(1, "aaa")
+        self.r.tick(steps=2)
+        self.assertEqual(self.r.fpp.output(A_DIMMER), 0)
+        self.assertEqual(self.r.fpp.output(B_DIMMER), 0)
+
+    def test_it_waits_for_enable_and_confirmation(self):
+        self.r.write_settings(enabled=0)
+        self.r.tick()
+        self.send(3, "aaa")
+        self.r.tick()
+        self.assertEqual(self.r.fpp.ranges, {})
+        self.r.write_settings(enabled=1, personal_use_confirmed=0)
+        self.r.tick()
+        self.send(3, "aaa")
+        self.r.tick()
+        self.assertEqual(self.r.fpp.ranges, {})
+
+    def test_a_request_made_while_disabled_does_not_fire_after_enabling(self):
+        self.r.write_settings(enabled=0)
+        self.r.tick()
+        self.send(30, "aaa")
+        self.r.tick()
+        self.r.write_settings(enabled=1)
+        self.r.tick()
+        self.assertEqual(self.r.fpp.ranges, {})
+
+    def test_disabling_during_it_releases(self):
+        self.send(30, "aaa")
+        self.r.tick()
+        self.assertEqual(self.r.fpp.output(A_DIMMER), 0)
+        self.r.write_settings(enabled=0)
+        self.r.tick()
+        self.assertEqual(self.r.fpp.ranges, {})
+
+    def test_status_carries_the_fixture_id(self):
+        self.r.tick()
+        self.assertEqual(self.r.status()["fixtures"][0]["id"], "aaa")
+
+    def test_a_fixture_change_reaches_the_status_at_once(self):
+        self.r.write_fixtures([{**HEAD_A, "id": "aaa"}, {"id": "ccc", "name": "Half"}])
+        self.r.tick()
+        self.assertEqual(self.r.status()["fixtures"][1]["problem"], "Incomplete")
+
+
+class NoFixturesWarningTests(unittest.TestCase):
+    def setUp(self):
+        self.r = Rig(self)
+
+    def warned(self):
+        return any("No moving heads" in w for w in self.r.status()["warnings"])
+
+    def test_no_warning_with_a_working_fixture(self):
+        self.r.tick()
+        self.assertFalse(self.warned())
+
+    def test_an_empty_list_warns(self):
+        self.r.write_fixtures([])
+        self.r.tick()
+        self.assertTrue(self.warned())
+
+    def test_only_incomplete_or_unresolved_rows_warn(self):
+        self.r.write_fixtures([{"name": "Half", "universe": 1}, {"name": "Lost", "universe": 99, "dimmer_ch": 1}])
+        self.r.tick()
+        self.assertTrue(self.warned())
+
+    def test_only_disabled_rows_warn(self):
+        self.r.write_fixtures([{**HEAD_A, "enabled": False}])
+        self.r.tick()
+        self.assertTrue(self.warned())
+
+    def test_adding_one_clears_it(self):
+        self.r.write_fixtures([])
+        self.r.tick()
+        self.r.write_fixtures([HEAD_A])
+        self.r.tick()
+        self.assertFalse(self.warned())
+
+    def test_it_stays_quiet_while_disabled_or_unconfirmed(self):
+        self.r.write_fixtures([])
+        self.r.write_settings(enabled=0)
+        self.r.tick()
+        self.assertFalse(self.warned())
+        self.r.write_settings(enabled=1, personal_use_confirmed=0)
+        self.r.tick()
+        self.assertFalse(self.warned())
+
+
 class CommandAcceptanceTests(unittest.TestCase):
     def setUp(self):
         self.r = Rig(self)

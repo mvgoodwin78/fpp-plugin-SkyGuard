@@ -51,7 +51,7 @@
 		"remoteAccess": "none",
 		"systemChanges": [],
 		"closedCode": false,
-		"other": "For personal use only; it does nothing until you confirm that. Runs a background program while FPP runs, and forces the dimmer and shutter channels you list to their off values during a blackout. Anyone who can reach FPP can read this plugin's status, including your show's location, and can run its Enable, Disable and Test Trigger commands. Uninstalling removes its saved data."
+		"other": "For personal use only; it does nothing until you confirm that. Runs a background program while FPP runs, and forces the dimmer and shutter channels you list to their off values during a blackout. Anyone who can reach FPP can read this plugin's status, including your show's location, can change its settings including the saved location and fixture list, can ask it to test a receiver or online provider or look up an address, and can run its Enable, Disable and Test Trigger commands. Uninstalling removes its saved data."
 	},
 	"versions": [
 		{

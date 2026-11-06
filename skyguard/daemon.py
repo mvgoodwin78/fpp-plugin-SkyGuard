@@ -97,6 +97,7 @@ class Daemon:
         self._no_position_logged = set()
         self._skipped_logged = 0
         self._error_active = False
+        self._head_test = None  # (fixture id, end time) while one head is being tested
 
         self._matrix_lock = threading.Lock()
         self._matrix_request = None
@@ -154,11 +155,16 @@ class Daemon:
             name = command["command"]
             if name == commands.TEST:
                 seconds = commands.test_seconds(command.get("seconds"))
-                if self.settings.enabled:
-                    _logger.info("Test trigger for %s s", seconds)
+                allowed = self.settings.enabled and self.settings.personal_use_confirmed
+                fixture = command.get("fixture")
+                if not allowed:
+                    _logger.info("Test trigger ignored because SkyGuard is disabled or not confirmed")
+                elif fixture:
+                    _logger.info("Test of one head for %s s", seconds)
+                    self._head_test = (str(fixture), self._clock() + seconds)
                 else:
-                    _logger.info("Test trigger ignored because SkyGuard is disabled")
-                self.engine.start_test(self._clock(), seconds)
+                    _logger.info("Test trigger for %s s", seconds)
+                    self.engine.start_test(self._clock(), seconds)
             else:
                 self._pending_enabled = name == commands.ENABLE
                 _logger.info("SkyGuard %s command received", name)
@@ -264,11 +270,29 @@ class Daemon:
         resolved = self.resolver.refresh(self.store.fixtures)
         target = blackout_target(resolved)
         self._hold_after_corrupt_ledger(target)
-        self.overlay.sync(target if self.engine.state == BLACKOUT else {})
+        self._report_fixture_setup(settings, target)
+        self.overlay.sync(self._channels_to_hold(now, resolved, target))
 
         self._request_matrix(zone, in_zone)
         self._log_skips(zone, feed_state)
         self._write_status(now, feed_state, zone, resolved)
+
+    def _report_fixture_setup(self, settings, target):
+        missing = settings.enabled and settings.personal_use_confirmed and not target
+        self.notifier.emit("no_fixtures" if missing else "fixtures_set")
+
+    def _channels_to_hold(self, now, resolved, target):
+        """Everything during a blackout, otherwise only the head being tested, if any."""
+        hold = dict(target) if self.engine.state == BLACKOUT else {}
+        if self._head_test is not None:
+            fixture_id, until = self._head_test
+            if now >= until or not (self.settings.enabled and self.settings.personal_use_confirmed):
+                self._head_test = None
+            else:
+                for fixture in resolved:
+                    if fixture.id == fixture_id:
+                        hold.update({channel: value for channel, value, _role in fixture.channels})
+        return hold
 
     def _handle_step_error(self):
         """Something unexpected happened, so what the heads are doing is unknown. During a

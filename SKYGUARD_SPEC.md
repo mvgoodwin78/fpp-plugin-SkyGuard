@@ -85,6 +85,8 @@ fpp-plugin-SkyGuard/
     supervisor.py          # restarts the daemon with capped backoff
     commands.py            # command spool between FPP commands and the daemon
     release.py             # releases everything the ledger holds, for uninstall
+  js/
+    skyguard-settings.js   # settings page; FPP loads everything in js/ on the plugin's pages
     config.py              # settings load/reload
     feeds/
       base.py              # normalized record + shared parsing
@@ -387,7 +389,7 @@ SkyGuard registers three FPP commands and serves one read-only status endpoint t
 | --- | --- | --- |
 | SkyGuard Enable | none | Plugin evaluates normally (persisted setting) |
 | SkyGuard Disable | none | Releases all overlays, goes IDLE, raises a "SkyGuard disabled" warning so it's never off silently |
-| SkyGuard Test Trigger | seconds (default 10) | Forces BLACKOUT for N seconds with reason `test`, including matrix message, then normal evaluation resumes |
+| SkyGuard Test Trigger | seconds (default 10), optional fixture ID | Forces BLACKOUT for N seconds with reason `test`, including matrix message, then normal evaluation resumes. With a fixture ID, holds only that head dark for N seconds, without changing the state or showing a message |
 
 Command scripts pass the request to the daemon through a spool folder, `plugindata/fpp-plugin-SkyGuard/commands/`: each drops a small JSON file and exits, and the daemon reads the folder every 0.25 s. A spool opens no port, so nothing new is reachable on the network. They must return quickly: fppd waits for each one to exit.
 
@@ -559,7 +561,10 @@ Setup walkthrough, how the blackout works (which channels, fail-safe behavior), 
 
 - SkyGuard Test Trigger gains an optional `fixture` argument (blacks out one head for 3 s).
 - Status JSON gains `events[]` (last 20 transitions).
-- `api.php` gains fixture endpoints: list, add, update and delete one row, so rows save on change.
+- `api.php` gains fixture endpoints: list, add, update and delete one row, so rows save on change. Rows carry a stable `id`, which the status also reports.
+- `api.php` gains `GET`/`PUT private` for the center and API key, which never returns the key, only `api_key_set`; and `POST test-receiver` and `POST test-online`, which report a count or an error and never pass a response on. `test-online` needs personal use confirmed and a center, and is limited to one request every 5 s.
+- Every write route requires `Content-Type: application/json`, so a page on another site can't send one as a simple request. Free-text settings refuse `"` and `\\`, because FPP 9.5 writes settings into an inline script without escaping them.
+- A `no_fixtures` warning shows while enabled and confirmed with no head that resolves to a channel, cleared by `fixtures_set`.
 - New settings: `units`, `setup_state`.
 
 ## Verification results

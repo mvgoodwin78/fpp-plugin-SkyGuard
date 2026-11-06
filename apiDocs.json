@@ -4,13 +4,21 @@
 			"get": {
 				"summary": "SkyGuard's current state, feed health, aircraft, fixtures and warnings",
 				"description": "Read-only. Includes the show's location, because the map needs it. `running` is false when the daemon hasn't updated its status recently.",
-				"responses": { "200": { "description": "Status" } }
+				"responses": {
+					"200": {
+						"description": "Status"
+					}
+				}
 			}
 		},
 		"/api/plugin/fpp-plugin-SkyGuard/headerIndicator": {
 			"get": {
 				"summary": "The icon FPP shows in its page header when SkyGuard has a warning",
-				"responses": { "200": { "description": "Indicator" } }
+				"responses": {
+					"200": {
+						"description": "Indicator"
+					}
+				}
 			}
 		},
 		"/api/plugin/fpp-plugin-SkyGuard/geocode": {
@@ -18,14 +26,215 @@
 				"summary": "Look up map positions for an address",
 				"description": "Sends the address to nominatim.openstreetmap.org. Only called when the user presses Look up.",
 				"parameters": [
-					{ "name": "q", "in": "query", "required": true, "schema": { "type": "string" }, "description": "The address" }
+					{
+						"name": "q",
+						"in": "query",
+						"required": true,
+						"schema": {
+							"type": "string"
+						},
+						"description": "The address"
+					}
 				],
 				"responses": {
-					"200": { "description": "Candidate positions" },
-					"400": { "description": "No usable address given" },
-					"403": { "description": "Address lookup is switched off" },
-					"429": { "description": "Asked too soon after the last lookup" },
-					"502": { "description": "The lookup service couldn't be reached" }
+					"200": {
+						"description": "Candidate positions"
+					},
+					"400": {
+						"description": "No usable address given"
+					},
+					"403": {
+						"description": "Address lookup is switched off"
+					},
+					"429": {
+						"description": "Asked too soon after the last lookup"
+					},
+					"502": {
+						"description": "The lookup service couldn't be reached"
+					}
+				}
+			}
+		},
+		"/api/plugin/fpp-plugin-SkyGuard/private": {
+			"get": {
+				"summary": "The saved center point, and whether an API key is saved",
+				"description": "Never returns the key itself.",
+				"responses": {
+					"200": {
+						"description": "OK"
+					}
+				}
+			},
+			"put": {
+				"summary": "Save the center point and/or the API key",
+				"requestBody": {
+					"required": true,
+					"description": "center_lat and center_lon together, and/or online_api_key. Null clears a value.",
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "OK"
+					},
+					"400": {
+						"description": "Not JSON, or a value isn't valid"
+					}
+				}
+			}
+		},
+		"/api/plugin/fpp-plugin-SkyGuard/fixtures": {
+			"get": {
+				"summary": "The fixture list",
+				"description": "Gives an id to any saved row that doesn't have one yet.",
+				"responses": {
+					"200": {
+						"description": "OK"
+					}
+				}
+			},
+			"post": {
+				"summary": "Add a fixture row",
+				"requestBody": {
+					"required": true,
+					"description": "name, enabled, universe, start_channel, dimmer_ch, dimmer_off, shutter_ch, shutter_off",
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "OK"
+					},
+					"400": {
+						"description": "Not JSON, or a value isn't valid"
+					}
+				}
+			}
+		},
+		"/api/plugin/fpp-plugin-SkyGuard/fixtures/{id}": {
+			"put": {
+				"summary": "Replace one fixture row",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"requestBody": {
+					"required": true,
+					"description": "The same fields as adding a row",
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "OK"
+					},
+					"400": {
+						"description": "Not JSON, or a value isn't valid"
+					},
+					"404": {
+						"description": "That row no longer exists"
+					}
+				}
+			},
+			"delete": {
+				"summary": "Delete one fixture row",
+				"parameters": [
+					{
+						"name": "id",
+						"in": "path",
+						"required": true,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "OK"
+					}
+				}
+			}
+		},
+		"/api/plugin/fpp-plugin-SkyGuard/test-receiver": {
+			"post": {
+				"summary": "Check a receiver address",
+				"description": "Runs from FPP. Reports an aircraft count or an error, and never passes on what the address sent back.",
+				"requestBody": {
+					"required": true,
+					"description": "url",
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "OK"
+					},
+					"400": {
+						"description": "Not an http or https address"
+					},
+					"502": {
+						"description": "It couldn't be reached or didn't send aircraft data"
+					}
+				}
+			}
+		},
+		"/api/plugin/fpp-plugin-SkyGuard/test-online": {
+			"post": {
+				"summary": "Check an online provider",
+				"description": "Sends the saved center point to the provider chosen. Reports an aircraft count or an error.",
+				"requestBody": {
+					"required": true,
+					"description": "provider",
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "OK"
+					},
+					"400": {
+						"description": "Unknown provider, or no center point"
+					},
+					"403": {
+						"description": "Personal use not confirmed"
+					},
+					"429": {
+						"description": "Asked within 5 seconds of the last test"
+					},
+					"502": {
+						"description": "The provider couldn't be reached or refused"
+					}
 				}
 			}
 		}

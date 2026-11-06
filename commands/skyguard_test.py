@@ -10,4 +10,5 @@ from skyguard import commands  # noqa: E402
 from skyguard.config import Paths  # noqa: E402
 
 seconds = sys.argv[1] if len(sys.argv) > 1 else None
-commands.send_command(Paths.from_env(), commands.TEST, seconds)
+fixture = sys.argv[2] if len(sys.argv) > 2 else None
+commands.send_command(Paths.from_env(), commands.TEST, seconds, fixture)

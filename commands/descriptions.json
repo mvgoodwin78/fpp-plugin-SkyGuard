@@ -21,6 +21,13 @@
 				"max": 3600,
 				"default": "10",
 				"optional": true
+			},
+			{
+				"name": "fixture",
+				"description": "Fixture ID (empty for all heads)",
+				"type": "string",
+				"default": "",
+				"optional": true
 			}
 		]
 	}

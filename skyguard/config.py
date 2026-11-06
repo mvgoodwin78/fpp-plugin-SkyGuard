@@ -139,6 +139,7 @@ class Settings:
 @dataclass(frozen=True)
 class Fixture:
     name: str
+    id: str = ""
     enabled: bool = True
     universe: int | None = None
     start_channel: int | None = None
@@ -394,6 +395,7 @@ def parse_fixture(row):
 
     return Fixture(
         name=name,
+        id=str(row.get("id") or ""),
         enabled=enabled,
         universe=universe,
         start_channel=start_channel,
