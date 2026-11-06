@@ -64,15 +64,13 @@
 			"minFPPVersion": "9.5",
 			"maxFPPVersion": "9.99",
 			"branch": "master",
-			"sha": "",
-			"platforms": [ "Raspberry Pi", "BeagleBone Black", "BeagleBone 64" ]
+			"sha": ""
 		},
 		{
 			"minFPPVersion": "10.0",
 			"maxFPPVersion": "0",
 			"branch": "master",
-			"sha": "",
-			"platforms": [ "Raspberry Pi", "BeagleBone Black", "BeagleBone 64" ]
+			"sha": ""
 		}
 	]
 }

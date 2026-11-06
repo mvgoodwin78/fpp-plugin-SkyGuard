@@ -480,7 +480,7 @@ A `privacy` block is required for listing; generate it with the [Privacy disclos
 
 - `repoName`: `fpp-plugin-SkyGuard`; `name`: SkyGuard.
 - `description`: one or two sentences saying it blacks out moving-head light output when aircraft are within a set radius, using a local ADS-B receiver or online flight data.
-- `versions[]`: minimum FPP 9.5; `platforms` must use the exact strings `Raspberry Pi`, `BeagleBone Black` and `BeagleBone 64`.
+- `versions[]`: minimum FPP 9.5, with no `platforms` key, so it installs on any platform FPP runs on. SkyGuard needs no particular hardware, and listing boards kept it off virtual machines. It relies on Linux's `/proc` to find its own processes, so macOS isn't expected to work properly.
 - `dependencies`: declare any pip/apt packages (FPP 10+ only; also install them in `fpp_install.sh` for 9.5).
 - Category: chosen in the fpp-data listing request, not in this file. Use `Hardware` (Hardware, Controls & Animatronics) unless a reviewer prefers otherwise.
 - `bugURL`, `homeURL`, license (GPLv2), icon.

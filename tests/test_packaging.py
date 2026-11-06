@@ -56,11 +56,11 @@ class PluginInfoTests(unittest.TestCase):
         for leftover in ("TEMPLATE", "Template", "John Doe", "CoolPlugin", "FalconChristmas"):
             self.assertNotIn(leftover, text)
 
-    def test_versions_start_at_9_5_on_the_exact_platform_names(self):
+    def test_versions_start_at_9_5_on_every_platform(self):
         versions = self.info["versions"]
         self.assertEqual(versions[0]["minFPPVersion"], "9.5")
         for version in versions:
-            self.assertEqual(version["platforms"], ["Raspberry Pi", "BeagleBone Black", "BeagleBone 64"])
+            self.assertNotIn("platforms", version)  # it needs no particular hardware, and FPP also runs in VMs
             self.assertEqual(version["branch"], "master")
 
     def test_privacy_has_exactly_the_eight_keys(self):
