@@ -441,6 +441,21 @@ class PhpTests(unittest.TestCase):
         self.assertIn("personal_use_confirmed", script)
         self.assertIn("step.skippable", script)
 
+    def test_help_covers_what_the_spec_asks_for(self):
+        page = read("about.php")
+        for words in (
+            "Setting up", "How a blackout works", "Troubleshooting", "plugin-fpp-plugin-SkyGuard.log",
+            "fails dark", "Universe not found", "The message doesn't appear", "receiver missed it",
+            "macOS", "personal use", "3 miles", "OpenStreetMap",
+        ):
+            self.assertIn(words, page)
+
+    def test_help_uses_the_same_words_the_pages_show(self):
+        page = read("about.php")
+        for words in ("Test all heads", "Test on panels", "ground (ignored)", "Held dark", "NOT RUNNING"):
+            self.assertIn(words, page)
+            self.assertIn(words, read("status.php") + read("content.php") + read("assets/skyguard-status.js") + read("assets/skyguard-map.js"))
+
     def test_menu_has_at_most_one_entry_per_type(self):
         types = re.findall(r"'type' => '(\w+)'", read("menu.inc"))
         self.assertEqual(sorted(types), ["content", "help", "status"])

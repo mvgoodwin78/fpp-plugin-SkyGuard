@@ -124,9 +124,14 @@
         return aircraft.in_zone ? zoneClass : '';
     }
 
+    /* Labels on every aircraft hide each other, so only the ones that matter have one to start with. */
+    function labelShown(aircraft, opened) {
+        return aircraft.in_zone || opened[aircraft.hex] === true;
+    }
+
     /* ---- the radar plot ---- */
 
-    function drawRadar(box, status, options) {
+    function drawRadar(box, status, options, opened, toggle) {
         var plot = svgElement('svg', {
             'class': 'skyguard-radar',
             viewBox: '-110 -110 220 220',
@@ -174,8 +179,16 @@
                     d: 'M0 -4 L3 3 L0 1.5 L-3 3 Z',
                     transform: 'translate(' + x + ' ' + y + ') rotate(' + track + ')'
                 }));
-                var info = describe(aircraft, options.units(), status.radius.unit);
-                text(x + 5, y + 2, info.name + (aircraft.ground_ignored ? ' ground (ignored)' : ''));
+                /* Larger than the shape, so a finger can hit it. */
+                var target = svgElement('circle', { 'class': 'skyguard-radar-target', cx: x, cy: y, r: 8 });
+                target.addEventListener('click', function () {
+                    toggle(aircraft.hex);
+                });
+                plot.appendChild(target);
+                if (labelShown(aircraft, opened)) {
+                    var info = describe(aircraft, options.units(), status.radius.unit);
+                    text(x + 5, y + 2, info.name + (aircraft.ground_ignored ? ' ground (ignored)' : ''));
+                }
             });
         }
         box.replaceChildren(plot);
@@ -229,6 +242,14 @@
         var last = null;
         var usingRadar = false;
         var tileTimer = null;
+        var opened = {}; /* aircraft whose label was opened by hand, kept through each refresh */
+
+        function toggleLabel(hex) {
+            opened[hex] = !opened[hex];
+            if (last) {
+                draw(last);
+            }
+        }
 
         function setNote(text) {
             if (options.note) {
@@ -309,9 +330,14 @@
             if (options.aircraft !== false) {
                 (status.aircraft || []).filter(hasPosition).forEach(function (aircraft) {
                     var info = describe(aircraft, options.units(), status.radius.unit);
-                    L.marker([aircraft.lat, aircraft.lon], { icon: planeIcon(aircraft), keyboard: false })
-                        .bindTooltip(planeLabel(aircraft, info), { permanent: true, direction: 'right', offset: [12, 0], className: 'skyguard-label' })
-                        .addTo(layers);
+                    var marker = L.marker([aircraft.lat, aircraft.lon], { icon: planeIcon(aircraft), keyboard: false });
+                    if (labelShown(aircraft, opened)) {
+                        marker.bindTooltip(planeLabel(aircraft, info), { permanent: true, direction: 'right', offset: [12, 0], className: 'skyguard-label' });
+                    }
+                    marker.on('click', function () {
+                        toggleLabel(aircraft.hex);
+                    });
+                    marker.addTo(layers);
                 });
             }
         }
@@ -342,7 +368,7 @@
                 }
             }
             if (usingRadar) {
-                drawRadar(box, status, options);
+                drawRadar(box, status, options, opened, toggleLabel);
             } else {
                 drawMap(status);
                 /* After the view is set, so tiles load only for where the map really is. */

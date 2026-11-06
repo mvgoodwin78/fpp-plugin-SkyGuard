@@ -17,6 +17,7 @@
 
     <div id="skyGuardMap" class="skyguard-map-area mb-1"></div>
     <div class="form-text" id="skyGuardMapLegend"></div>
+    <div class="form-text">Aircraft in the zone are labeled. Tap or click any other aircraft to show or hide its label.</div>
     <div class="form-text" id="skyGuardMapNote"></div>
     <div class="form-text" id="skyGuardOldData" hidden></div>
     <div class="form-text mb-3" id="skyGuardCredit" hidden>

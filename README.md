@@ -2,11 +2,11 @@
 
 An FPP plugin that blacks out moving-head light output whenever an aircraft is inside a radius you set, so beams aren't pointed at aircraft. Only each head's dimmer and shutter channels are forced to off values; pan, tilt, color and every other channel keep following the sequence.
 
-**Status: in development.** The backend is built and its settings pages aren't. It has been tested against FPP's API on one FPP 10.3 box, but not yet with real moving heads. Don't rely on it at a show yet.
+**Status: in development.** It has been tested on one FPP 10.3 box, but not yet with real moving heads, a real receiver or on FPP 9.5. Don't rely on it at a show yet.
 
 ## How it works
 
-- **Aircraft data** comes from a local ADS-B receiver, an online provider (adsb.fi or adsb.lol), or the receiver with online as a fallback.
+- **Aircraft data** comes from a local ADS-B receiver, an online provider (adsb.fi or adsb.lol), or both. With both, the receiver has priority: an aircraft it has located goes by the receiver radius. During a show, an aircraft it misses goes by the online data and online radius, and if the receiver stops, online data takes over.
 - **SkyGuard is for personal use only**, and it does nothing until you confirm that.
 - **Online data can lag behind real aircraft**, so increase your radius by 3 miles when using it. You enter one radius for online data and another for your own receiver, and SkyGuard stays idle until each one in use has been entered.
 - **During a show**, any qualifying aircraft inside the radius and altitude band blacks out the heads on that poll. They're released once the zone has been empty for the release delay.
@@ -16,6 +16,7 @@ An FPP plugin that blacks out moving-head light output whenever an aircraft is i
 ## What it sends, and to whom
 
 - **Online flight data:** your show's location and search radius go to the provider you choose.
+- **Map:** while a map is open, your browser loads images from OpenStreetMap, which shows it roughly where your show is. Clear the map address under Advanced to stop this.
 - **Address lookup:** a typed address goes to OpenStreetMap's Nominatim, only when you press Look up.
 - **Local receiver:** requests go to the address you enter.
 

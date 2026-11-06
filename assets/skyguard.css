@@ -151,6 +151,11 @@
     fill: var(--bs-secondary);
 }
 
+.skyguard-radar-target {
+    fill: transparent;
+    cursor: pointer;
+}
+
 .skyguard-radar-center {
     fill: var(--bs-primary);
 }
