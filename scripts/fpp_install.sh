@@ -27,7 +27,10 @@ chown -R fpp:fpp "${DATA_DIR}" 2>/dev/null || true
 # FPP 10 and later register commands live, through the callbacks script. Earlier versions
 # read them only when fppd starts, so they need a restart. If the version can't be read,
 # ask for the restart: an extra restart is harmless, and missing commands aren't.
-FPP_MAJOR="$("${FPPBINDIR:-${FPPDIR}/src}/fpp" -V 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -n 1 | cut -d. -f1 || true)"
+if ! VERSION_DOC="$(curl -s -m 2 http://localhost/api/fppd/version 2>/dev/null)"; then
+    VERSION_DOC=""
+fi
+FPP_MAJOR="$(echo "${VERSION_DOC}" | grep -oE '"majorVersion": *"?[0-9]+' | grep -oE '[0-9]+$' | head -n 1 || true)"
 if [ -z "${FPP_MAJOR}" ] || [ "${FPP_MAJOR}" -lt 10 ]; then
     setSetting restartFlag 1
 fi

@@ -527,16 +527,30 @@ class LifecycleTests(unittest.TestCase):
         self.paths = Paths.from_env({"MEDIADIR": self.media})
         self.addCleanup(self.run_hook, "scripts/preStop.sh")
 
-    def set_fpp_version(self, version):
-        path = os.path.join(self.fppdir, "src", "fpp")
+    def set_fpp_version(self, version, answer=None):
+        """A stand-in for curl, giving the answer a real FPP 10.3 gave to /api/fppd/version."""
+        major, minor = version.split(".")
+        answer = answer or json.dumps({
+            "Message": "", "Status": "OK", "branch": f"v{version}", "fppdAPI": "v1",
+            "majorVersion": major, "minorVersion": minor, "respCode": 200, "version": version,
+        })
+        bin_dir = os.path.join(self.base, "bin")
+        os.makedirs(bin_dir, exist_ok=True)
+        path = os.path.join(bin_dir, "curl")
         with open(path, "w", encoding="utf-8") as handle:
-            handle.write(f'#!/bin/bash\necho "FPP Version: {version}"\n')
+            handle.write(f"#!/bin/bash\necho '{answer}'\n")
         os.chmod(path, 0o755)
 
     def run_hook(self, name, *args, **env):
         return subprocess.run(
             [os.path.join(self.plugin, name), *args],
-            env={**os.environ, "FPPDIR": self.fppdir, "PYTHONDONTWRITEBYTECODE": "1", **env},
+            env={
+                **os.environ,
+                "FPPDIR": self.fppdir,
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PATH": os.path.join(self.base, "bin") + os.pathsep + os.environ["PATH"],
+                **env,
+            },
             capture_output=True, text=True, timeout=20,
         )
 
@@ -600,9 +614,19 @@ class LifecycleTests(unittest.TestCase):
             self.assertIn("restartFlag=1", handle.read())
 
     def test_a_restart_is_asked_for_if_the_version_cannot_be_read(self):
-        os.unlink(os.path.join(self.fppdir, "src", "fpp"))
+        self.set_fpp_version("10.3", answer="not json")
         self.assertEqual(self.run_hook("scripts/fpp_install.sh").returncode, 0)
         self.assertTrue(os.path.exists(self.flag_file))
+
+    def test_a_number_for_the_major_version_is_read_too(self):
+        self.set_fpp_version("10.3", answer='{"version": "10.3", "majorVersion": 10, "minorVersion": 3}')
+        self.run_hook("scripts/fpp_install.sh")
+        self.assertFalse(os.path.exists(self.flag_file))
+
+    def test_the_version_comes_from_the_api_because_the_fpp_tool_has_no_version_option(self):
+        for name in ("scripts/fpp_install.sh", "scripts/fpp_uninstall.sh"):
+            self.assertIn("/api/fppd/version", read(name))
+            self.assertNotIn(" -V", read(name))
 
     def test_post_start_returns_at_once_and_the_daemon_runs(self):
         self.run_hook("scripts/fpp_install.sh")
