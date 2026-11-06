@@ -223,7 +223,12 @@
         var age = status.last_data_age_s;
         var old = typeof age === 'number' && age > staleAfterS;
         var note = byId('skyGuardOldData');
-        note.hidden = !old;
+        var waiting = typeof age !== 'number' && status.running !== false && !!status.state;
+        note.hidden = !(old || waiting);
+        if (waiting) {
+            note.textContent = status.enabled ? 'No aircraft data has arrived yet.' :
+                'No aircraft are shown, because SkyGuard does not request online data while it is disabled. Enable it to see them here.';
+        }
         if (!old) {
             return status;
         }
