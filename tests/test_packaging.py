@@ -1,5 +1,7 @@
 """The plugin as FPP sees it: metadata, scripts and the full lifecycle on Linux."""
 
+import base64
+import hashlib
 import json
 import os
 import re
@@ -86,7 +88,7 @@ class PluginInfoTests(unittest.TestCase):
             self.assertIn(host, self.info["description"])
 
     def test_nothing_is_marked_as_sending_on_its_own(self):
-        self.assertFalse(any(send["alwaysOn"] for send in self.privacy["sends"]))
+        self.assertEqual([send["to"] for send in self.privacy["sends"] if send["alwaysOn"]], ["tile.openstreetmap.org"])
 
     def test_the_location_is_disclosed_as_kept(self):
         self.assertIn("private.json", self.privacy["collects"][0]["where"])
@@ -305,43 +307,84 @@ class PhpTests(unittest.TestCase):
         self.assertIn("rename(", self.api)
         self.assertIn("flock(", self.api)
 
-    def test_settings_page_loads_its_script_from_a_name_fpp_serves(self):
-        for name in os.listdir(os.path.join(ROOT, "js")):
-            self.assertRegex(name, r"^[A-Za-z0-9_.-]+$")
+    def test_every_loaded_file_exists_under_a_name_fpp_serves(self):
+        for page in ("content.php", "status.php"):
+            names = re.findall(r"'([\w./-]+\.(?:js|css))'", read(page))
+            self.assertGreaterEqual(len(names), 4, page)
+            for name in names:
+                self.assertRegex(name, r"^[A-Za-z0-9_./-]+$")
+                self.assertTrue(os.path.isfile(os.path.join(ROOT, "assets", name)), name)
 
     def test_pages_have_no_hard_coded_colors(self):
         for name in ("content.php", "status.php", "about.php"):
             text = read(name)
             self.assertIsNone(re.search(r"#[0-9a-fA-F]{3,8}\b(?!\w)|\brgb\(|style=\"[^\"]*color", text), name)
-        script = read("js/skyguard-settings.js")
+        script = read("assets/skyguard-settings.js")
         self.assertIsNone(re.search(r"style\.(?:color|background)", script))
 
     def test_no_external_loads(self):
-        for name in ("content.php", "js/skyguard-settings.js"):
+        for name in ("content.php", "assets/skyguard-settings.js"):
             self.assertIsNone(re.search(r"<script[^>]+src=|<link[^>]+href=", read(name)), name)
 
+    def test_plugin_files_load_with_a_version_because_fpp_lets_browsers_keep_them_a_year(self):
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "js")), "FPP would load js/ with no version")
+        self.assertFalse(os.path.exists(os.path.join(ROOT, "css")), "FPP would load css/ with no version")
+        self.assertIn("filemtime", read("skyguard_assets.inc"))
+        self.assertIn("&v=", read("skyguard_assets.inc"))
+        for page in ("content.php", "status.php"):
+            self.assertIn("skyguard_assets.inc", read(page))
+            self.assertIn("skyGuardScripts(", read(page))
+            self.assertIn("skyGuardStyles(", read(page))
+
+    def test_leaflet_is_the_unchanged_release(self):
+        expected = {
+            "assets/leaflet/leaflet.js": "20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=",
+            "assets/leaflet/leaflet.css": "p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=",
+        }
+        for name, digest in expected.items():
+            with open(os.path.join(ROOT, name), "rb") as handle:
+                self.assertEqual(base64.b64encode(hashlib.sha256(handle.read()).digest()).decode(), digest, name)
+        self.assertIn("BSD 2-Clause", read("assets/leaflet/LICENSE"))
+
+    def test_new_scripts_write_text_not_html_and_new_styles_use_theme_colors(self):
+        for name in ("assets/skyguard-status.js", "assets/skyguard-map.js"):
+            script = read(name)
+            self.assertNotIn("innerHTML", script, name)
+            self.assertNotIn(".html(", script, name)
+            self.assertIsNone(re.search(r"#[0-9a-fA-F]{3,8}\b|\brgb\(", script), name)
+        self.assertIsNone(re.search(r"#[0-9a-fA-F]{3,8}\b|\brgb\(", read("assets/skyguard.css")))
+
+    def test_the_map_host_is_allowed_on_install_removed_on_uninstall_and_declared(self):
+        host = "https://tile.openstreetmap.org"
+        self.assertIn(f'ManageApacheContentPolicy.sh" add img-src {host}', read("scripts/fpp_install.sh"))
+        self.assertIn(f'ManageApacheContentPolicy.sh" remove img-src {host}', read("scripts/fpp_uninstall.sh"))
+        self.assertIn(host, read("assets/skyguard-map.js"))
+        info = json.loads(read("pluginInfo.json"))
+        sends = {entry["to"]: entry for entry in info["privacy"]["sends"]}
+        self.assertIn("your browser", sends["tile.openstreetmap.org"]["what"])
+
     def test_script_uses_no_jquery_helpers_removed_in_jquery_4(self):
-        script = read("js/skyguard-settings.js")
+        script = read("assets/skyguard-settings.js")
         for removed in ("$.trim", "$.isArray", "$.isFunction", ".size()"):
             self.assertNotIn(removed, script)
 
     def test_a_json_header_is_only_sent_with_a_body(self):
-        script = read("js/skyguard-settings.js")
+        script = read("assets/skyguard-settings.js")
         self.assertEqual(script.count("application/json"), 1)
         self.assertIn("options.body = JSON.stringify(body)", script)
 
     def test_script_writes_text_with_textcontent_not_html(self):
-        script = read("js/skyguard-settings.js")
+        script = read("assets/skyguard-settings.js")
         self.assertNotIn("innerHTML", script)
         self.assertNotIn(".html(", script)
 
     def test_quotes_are_refused_in_free_text(self):
         # FPP 9.5 writes settings into an inline script without escaping them.
-        self.assertIn("hasUnsafeCharacters", read("js/skyguard-settings.js"))
+        self.assertIn("hasUnsafeCharacters", read("assets/skyguard-settings.js"))
 
     def test_every_setting_on_the_page_is_one_the_daemon_knows(self):
-        known = set(Settings.__dataclass_fields__) | {"units", "setup_state"}
-        page = read("content.php") + read("js/skyguard-settings.js")
+        known = set(Settings.__dataclass_fields__) | {"units", "setup_state", "map_tile_url"}
+        page = read("content.php") + read("assets/skyguard-settings.js")
         names = set(re.findall(r"skyGuardNumber\('(\w+)'", page))
         names |= set(re.findall(r"skyGuard(?:Select|Checkbox)\('[^']*', '(\w+)'", page))
         names |= set(re.findall(r"data-(?:setting|free-text)=\"(\w+)\"", page))
@@ -352,7 +395,7 @@ class PhpTests(unittest.TestCase):
     def test_the_defaults_shown_are_the_daemons_defaults(self):
         defaults = Settings()
         page = read("content.php")
-        shown = re.findall(r"skyGuardNumber\('(\w+)', [-\d.]+, [-\d.]+, '([^']*)'\)", page)
+        shown = re.findall(r"skyGuardNumber\('(\w+)', [-\d.]+, [-\d.]+, '([^']*)'(?:, '[^']*')?\)", page)
         self.assertGreater(len(shown), 8)
         for name, value in shown:
             self.assertEqual(float(value), float(getattr(defaults, name)), name)
@@ -382,7 +425,7 @@ class PhpTests(unittest.TestCase):
             self.assertIn(f"skyGuardNumber('{setting}', {low}, {high}", page)
 
     def test_the_preview_and_the_panel_test_use_the_same_samples(self):
-        script = read("js/skyguard-settings.js")
+        script = read("assets/skyguard-settings.js")
         block = script.split("var PLACEHOLDERS = {")[1].split("}")[0]
         shown = dict(re.findall(r"(\w+): '([^']*)'", block))
         self.assertEqual(shown, SAMPLE_VALUES)
@@ -394,7 +437,7 @@ class PhpTests(unittest.TestCase):
             self.assertRegex(color, r"^#[0-9a-fA-F]{3,8}$|^[a-zA-Z]+$")
 
     def test_the_personal_use_step_has_no_skip(self):
-        script = read("js/skyguard-settings.js")
+        script = read("assets/skyguard-settings.js")
         self.assertIn("personal_use_confirmed", script)
         self.assertIn("step.skippable", script)
 

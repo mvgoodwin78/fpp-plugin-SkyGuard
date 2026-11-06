@@ -1,4 +1,6 @@
 <?php
+require_once __DIR__ . '/skyguard_assets.inc';
+skyGuardStyles(array('leaflet/leaflet.css', 'skyguard.css'));
 $skyGuardRepo = 'fpp-plugin-SkyGuard';
 
 // One labeled row. Stacks on a phone and sits side by side from medium screens up.
@@ -18,9 +20,15 @@ function skyGuardRowClose() {
 
 // A number box, which also keeps out the characters FPP 9.5 can't print safely.
 // For this input type FPP's helper uses its length and size arguments as max and min.
-function skyGuardNumber($setting, $min, $max, $default = '') {
+function skyGuardNumber($setting, $min, $max, $default = '', $unit = '') {
     global $skyGuardRepo;
+    if ($unit !== '') {
+        echo "<div class='input-group'>";
+    }
     PrintSettingTextSaved($setting, 0, 0, $max, $min, $skyGuardRepo, $default, 'skyGuardSettingSaved', '', 'number', array('step' => 'any'));
+    if ($unit !== '') {
+        echo "<span class='input-group-text'>" . htmlspecialchars($unit) . "</span></div>";
+    }
 }
 
 function skyGuardSelect($title, $setting, $default, $values) {
@@ -68,13 +76,13 @@ function skyGuardCheckbox($title, $setting, $default) {
             <div data-show-with="receiver">
                 <?php skyGuardRowOpen('Receiver address', '', 'For example http://192.168.1.50/data/aircraft.json'); ?>
                 <input type="url" class="form-control" id="skyGuardReceiverUrl" data-free-text="receiver_url" maxlength="300" aria-label="Receiver address">
-                <button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="skyGuardTestReceiver">Test</button>
+                <button type="button" class="btn btn-sm btn-secondary mt-1" id="skyGuardTestReceiver">Test</button>
                 <span class="small ms-2" id="skyGuardTestReceiverResult"></span>
                 <?php skyGuardRowClose(); ?>
 
                 <?php skyGuardRowOpen('978 MHz decoder address', '', 'Optional, for a separate UAT decoder'); ?>
                 <input type="url" class="form-control" id="skyGuardReceiver978Url" data-free-text="receiver_978_url" maxlength="300" aria-label="978 MHz decoder address">
-                <button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="skyGuardTest978">Test</button>
+                <button type="button" class="btn btn-sm btn-secondary mt-1" id="skyGuardTest978">Test</button>
                 <span class="small ms-2" id="skyGuardTest978Result"></span>
                 <?php skyGuardRowClose(); ?>
             </div>
@@ -85,7 +93,7 @@ function skyGuardCheckbox($title, $setting, $default) {
                     'adsb.fi (updates every 2 seconds)' => 'adsb.fi',
                     'adsb.lol (updates every 15 seconds)' => 'adsb.lol',
                 )); ?>
-                <button type="button" class="btn btn-sm btn-outline-secondary mt-1" id="skyGuardTestOnline">Test</button>
+                <button type="button" class="btn btn-sm btn-secondary mt-1" id="skyGuardTestOnline">Test</button>
                 <span class="small ms-2" id="skyGuardTestOnlineResult"></span>
                 <div class="form-text" id="skyGuardProviderCredit" hidden>
                     Flight data from <a href="https://adsb.fi" target="_blank" rel="noopener">adsb.fi</a>.
@@ -98,8 +106,8 @@ function skyGuardCheckbox($title, $setting, $default) {
                 <?php skyGuardRowOpen('API key', '', 'Optional. None of the current providers needs one.'); ?>
                 <div class="input-group">
                     <input type="password" class="form-control" id="skyGuardApiKey" maxlength="200" autocomplete="off">
-                    <button type="button" class="btn btn-outline-secondary" id="skyGuardApiKeySave">Save</button>
-                    <button type="button" class="btn btn-outline-secondary" id="skyGuardApiKeyClear">Clear</button>
+                    <button type="button" class="btn btn-secondary" id="skyGuardApiKeySave">Save</button>
+                    <button type="button" class="btn btn-secondary" id="skyGuardApiKeyClear">Clear</button>
                 </div>
                 <div class="form-text" id="skyGuardApiKeyState"></div>
                 <?php skyGuardRowClose(); ?>
@@ -119,7 +127,7 @@ function skyGuardCheckbox($title, $setting, $default) {
             </div>
             <div class="mt-2 d-flex flex-wrap gap-2">
                 <button type="button" class="btn btn-sm btn-primary" id="skyGuardCenterSave">Save center point</button>
-                <button type="button" class="btn btn-sm btn-outline-secondary" id="skyGuardUseLocation">Use my location</button>
+                <button type="button" class="btn btn-sm btn-secondary" id="skyGuardUseLocation">Use my location</button>
             </div>
             <div class="form-text" id="skyGuardLocationNote"></div>
             <?php skyGuardRowClose(); ?>
@@ -127,7 +135,7 @@ function skyGuardCheckbox($title, $setting, $default) {
             <?php skyGuardRowOpen('Find an address', '', 'Sent to OpenStreetMap only when you press Look up.'); ?>
             <div class="input-group">
                 <input type="text" class="form-control" id="skyGuardAddress" maxlength="200" aria-label="Address">
-                <button type="button" class="btn btn-outline-secondary" id="skyGuardLookup">Look up</button>
+                <button type="button" class="btn btn-secondary" id="skyGuardLookup">Look up</button>
             </div>
             <div id="skyGuardLookupResults" class="list-group mt-2"></div>
             <div class="form-text" id="skyGuardLookupNote"></div>
@@ -135,6 +143,11 @@ function skyGuardCheckbox($title, $setting, $default) {
 
             <div id="skyGuardLagNotice" class="alert alert-info" role="status" data-show-with="online">
                 Online flight data can lag behind real aircraft. Increase your radius by 3 miles to allow for it.
+            </div>
+
+            <div class="mb-3">
+                <div id="skyGuardLocationMap" class="skyguard-map-area skyguard-map-area-small"></div>
+                <div class="form-text" id="skyGuardLocationMapNote"></div>
             </div>
 
             <div data-show-with="online">
@@ -151,11 +164,11 @@ function skyGuardCheckbox($title, $setting, $default) {
             <?php skyGuardSelect('Radius unit', 'radius_unit', 'mi', array('Miles' => 'mi', 'Nautical miles' => 'nm', 'Kilometers' => 'km')); ?>
             <?php skyGuardRowClose(); ?>
 
-            <?php skyGuardRowOpen('Lowest altitude (ft)', '', '0 includes aircraft on the ground.'); ?>
-            <?php skyGuardNumber('alt_floor_ft', -2000, 100000, '0'); ?>
+            <?php skyGuardRowOpen('Lowest altitude', '', '0 includes aircraft on the ground.'); ?>
+            <?php skyGuardNumber('alt_floor_ft', -2000, 100000, '0', 'feet'); ?>
             <?php skyGuardRowClose(); ?>
-            <?php skyGuardRowOpen('Highest altitude (ft)'); ?>
-            <?php skyGuardNumber('alt_ceiling_ft', -2000, 100000, '10000'); ?>
+            <?php skyGuardRowOpen('Highest altitude'); ?>
+            <?php skyGuardNumber('alt_ceiling_ft', -2000, 100000, '10000', 'feet'); ?>
             <?php skyGuardRowClose(); ?>
             <?php skyGuardRowOpen('Ignore aircraft on the ground', '', 'Skips aircraft reporting they are on the ground until they reach the speed limit under Advanced.'); ?>
             <?php skyGuardCheckbox('Ignore aircraft on the ground', 'ignore_ground', 0); ?>
@@ -232,34 +245,37 @@ function skyGuardCheckbox($title, $setting, $default) {
     </div>
 
     <div class="mt-4">
-        <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#skyGuardAdvanced" aria-expanded="false" aria-controls="skyGuardAdvanced">Advanced</button>
+        <button class="btn btn-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#skyGuardAdvanced" aria-expanded="false" aria-controls="skyGuardAdvanced">Advanced</button>
         <div class="collapse mt-3" id="skyGuardAdvanced">
-            <?php skyGuardRowOpen('Poll interval (seconds)', '', '1 to 2. An online provider\'s own minimum applies on top of this.'); ?>
-            <?php skyGuardNumber('poll_interval_s', 1, 2, '1'); ?>
+            <?php skyGuardRowOpen('Poll interval', '', 'How often SkyGuard asks for aircraft positions, from 1 to 2 seconds. Shorter notices an aircraft sooner. Your receiver is always asked this often. Online data follows this only during a show, and never faster than the provider allows: every 2 seconds for adsb.fi, every 15 seconds for adsb.lol.'); ?>
+            <?php skyGuardNumber('poll_interval_s', 1, 2, '1', 'seconds'); ?>
             <?php skyGuardRowClose(); ?>
-            <?php skyGuardRowOpen('Online interval outside a show (seconds)', '', '5 to 300.'); ?>
-            <?php skyGuardNumber('online_idle_interval_s', 5, 300, '30'); ?>
+            <?php skyGuardRowOpen('Online interval outside a show', '', 'How often online data is asked when no show is running, from 5 to 300 seconds. Slower is kinder to the free services.'); ?>
+            <?php skyGuardNumber('online_idle_interval_s', 5, 300, '30', 'seconds'); ?>
             <?php skyGuardRowClose(); ?>
-            <?php skyGuardRowOpen('Receiver check interval (seconds)'); ?>
-            <?php skyGuardNumber('health_interval_s', 1, 3600, '10'); ?>
+            <?php skyGuardRowOpen('Receiver check interval'); ?>
+            <?php skyGuardNumber('health_interval_s', 1, 3600, '10', 'seconds'); ?>
             <?php skyGuardRowClose(); ?>
             <?php skyGuardRowOpen('Failed checks before backup', '', 'Used when online data is the backup.'); ?>
             <?php skyGuardNumber('health_fail_count', 1, 100, '2'); ?>
             <?php skyGuardRowClose(); ?>
-            <?php skyGuardRowOpen('Maximum data age (seconds)', '', 'Older data blacks out the heads during a show. 0 means on the first failed poll.'); ?>
-            <?php skyGuardNumber('max_data_age_s', 0, 3600, '5'); ?>
+            <?php skyGuardRowOpen('Maximum data age', '', 'Older data blacks out the heads during a show. 0 means on the first failed poll.'); ?>
+            <?php skyGuardNumber('max_data_age_s', 0, 3600, '5', 'seconds'); ?>
             <?php skyGuardRowClose(); ?>
-            <?php skyGuardRowOpen('Release delay (seconds)', '', 'How long the zone must stay clear. 0 releases at once.'); ?>
-            <?php skyGuardNumber('release_delay_s', 0, 3600, '5'); ?>
+            <?php skyGuardRowOpen('Release delay', '', 'How long the zone must stay clear. 0 releases at once.'); ?>
+            <?php skyGuardNumber('release_delay_s', 0, 3600, '5', 'seconds'); ?>
             <?php skyGuardRowClose(); ?>
             <?php skyGuardRowOpen('Count aircraft with no position', '', 'Fail-safe: these count as in the zone if their altitude is in range.'); ?>
             <?php skyGuardCheckbox('Count aircraft with no position', 'count_no_position', 1); ?>
             <?php skyGuardRowClose(); ?>
-            <?php skyGuardRowOpen('Ground speed limit (knots)', '', 'With "Ignore aircraft on the ground" on, they count once they reach this speed. 5 to 100.'); ?>
-            <?php skyGuardNumber('ground_speed_limit_kt', 5, 100, '40'); ?>
+            <?php skyGuardRowOpen('Ground speed limit', '', 'With "Ignore aircraft on the ground" on, an aircraft reporting it is on the ground is skipped until it reaches this speed. 5 to 100 knots; 40 knots is about 46 mph or 74 km/h.'); ?>
+            <?php skyGuardNumber('ground_speed_limit_kt', 5, 100, '40', 'knots'); ?>
             <?php skyGuardRowClose(); ?>
             <?php skyGuardRowOpen('Display units'); ?>
             <?php skyGuardSelect('Display units', 'units', 'imperial', array('Imperial (mi, ft, kt)' => 'imperial', 'Metric (km, m, km/h)' => 'metric')); ?>
+            <?php skyGuardRowClose(); ?>
+            <?php skyGuardRowOpen('Map tile address', '', 'Where the map background comes from. Empty shows only a radar plot and contacts no map service. Another server also has to be allowed in FPP\'s content policy.'); ?>
+            <input type="url" class="form-control" id="skyGuardTileUrl" data-free-text="map_tile_url" maxlength="300" aria-label="Map tile address">
             <?php skyGuardRowClose(); ?>
             <?php skyGuardRowOpen('Address lookup'); ?>
             <?php skyGuardSelect('Address lookup', 'geocoder', 'nominatim', array('OpenStreetMap Nominatim' => 'nominatim', 'Off' => 'off')); ?>
@@ -267,3 +283,4 @@ function skyGuardCheckbox($title, $setting, $default) {
         </div>
     </div>
 </div>
+<?php skyGuardScripts(array('leaflet/leaflet.js', 'skyguard-map.js', 'skyguard-settings.js')); ?>

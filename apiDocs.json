@@ -3,7 +3,7 @@
 		"/api/plugin/fpp-plugin-SkyGuard/status": {
 			"get": {
 				"summary": "SkyGuard's current state, feed health, aircraft, fixtures and warnings",
-				"description": "Read-only. Includes the show's location, because the map needs it. `running` is false when the daemon hasn't updated its status recently.",
+				"description": "Read-only. Includes the show's location, because the map needs it. `running` is false when the daemon hasn't updated its status recently. `held_channels` lists the channels being forced now, and `events` the last 20 blackout starts and ends.",
 				"responses": {
 					"200": {
 						"description": "Status"

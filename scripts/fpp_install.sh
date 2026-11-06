@@ -31,3 +31,10 @@ FPP_MAJOR="$("${FPPBINDIR:-${FPPDIR}/src}/fpp" -V 2>/dev/null | grep -oE '[0-9]+
 if [ -z "${FPP_MAJOR}" ] || [ "${FPP_MAJOR}" -lt 10 ]; then
     setSetting restartFlag 1
 fi
+
+# Lets browsers load the map's background. Without it the pages show the radar plot instead,
+# so a failure here is no reason to fail the install.
+if [ -x "${FPPDIR}/scripts/ManageApacheContentPolicy.sh" ]; then
+    "${FPPDIR}/scripts/ManageApacheContentPolicy.sh" add img-src https://tile.openstreetmap.org \
+        || echo "SkyGuard could not allow the map tiles, so its pages will show the radar plot."
+fi

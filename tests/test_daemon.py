@@ -11,6 +11,7 @@ import time
 import unittest
 
 from skyguard import commands
+from skyguard.status import load_events, recent_events
 from skyguard.config import Paths
 from skyguard.daemon import Daemon
 from skyguard.feeds.base import FeedError
@@ -424,6 +425,67 @@ class ScheduleAcceptanceTests(unittest.TestCase):
         self.r.tick()
         self.assertEqual((self.r.state, self.r.reason), ("IDLE", "no_center"))
         self.assertTrue(any("center point" in w for w in self.r.status()["warnings"]))
+
+
+class StatusForThePageTests(unittest.TestCase):
+    def setUp(self):
+        self.r = Rig(self)
+        self.r.write_fixtures([{**HEAD_A, "id": "aaa"}, {**HEAD_B, "id": "bbb"}])
+        self.r.tick()
+
+    def read_status(self):
+        with open(self.r.paths.status_file, encoding="utf-8") as handle:
+            return json.load(handle)
+
+    def blackout_then_clear(self):
+        commands.send_command(self.r.paths, commands.TEST, 1)
+        self.r.wall = time.time()
+        self.r.tick()
+        self.assertEqual(self.r.state, "BLACKOUT")
+        self.r.tick(steps=8)
+        self.assertNotEqual(self.r.state, "BLACKOUT")
+
+    def test_held_channels_report_only_the_head_being_tested_and_clear_after(self):
+        commands.send_command(self.r.paths, commands.TEST, 2, "aaa")
+        self.r.wall = time.time()
+        self.r.tick()
+        self.assertEqual(self.read_status()["held_channels"], sorted([A_DIMMER, A_SHUTTER]))
+        self.r.tick(steps=3)
+        self.assertEqual(self.read_status()["held_channels"], [])
+
+    def test_a_blackout_and_its_end_are_events_with_a_time_and_reason(self):
+        self.blackout_then_clear()
+        events = self.read_status()["events"]
+        self.assertEqual([e["type"] for e in events], ["started", "ended"])
+        self.assertEqual(events[0]["reason"], "test")
+        self.assertIsInstance(events[0]["at"], (int, float))
+        self.assertIsInstance(events[0]["aircraft"], list)
+
+    def test_events_are_kept_to_the_last_twenty(self):
+        event = {"at": 1, "type": "started", "reason": "aircraft", "aircraft": ["A"]}
+        events = []
+        for number in range(25):
+            events = recent_events(events, {**event, "at": number})
+        self.assertEqual([e["at"] for e in events], list(range(5, 25)))
+
+    def test_an_event_cannot_hold_a_huge_aircraft_list(self):
+        event = {"at": 1, "type": "started", "reason": "aircraft", "aircraft": [str(n) for n in range(50)]}
+        self.assertEqual(len(recent_events([], event)[0]["aircraft"]), 10)
+
+    def test_events_survive_a_restart(self):
+        self.blackout_then_clear()
+        self.assertEqual(len(load_events(self.r.paths.status_file)), 2)
+        self.r.start()
+        self.r.tick(seconds=PERIODIC_WRITE_S)
+        self.assertEqual([e["type"] for e in self.read_status()["events"]], ["started", "ended"])
+
+    def test_an_unusable_status_file_means_no_events(self):
+        for content in ("not json", "[]", '{"events": 3}', '{"events": [1, {"at": 1}]}'):
+            with open(self.r.paths.status_file, "w", encoding="utf-8") as handle:
+                handle.write(content)
+            self.assertEqual(load_events(self.r.paths.status_file), [], content)
+        os.unlink(self.r.paths.status_file)
+        self.assertEqual(load_events(self.r.paths.status_file), [])
 
 
 class HeadTestTests(unittest.TestCase):

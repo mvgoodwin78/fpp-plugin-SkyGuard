@@ -23,7 +23,7 @@ from .fpp_api import BASE_URL, FppApi, FppError, read_in_schedule
 from .matrix import MatrixController
 from .notifier import LOGGER_NAME, LogSink, Notifier, WarningSink
 from .overlay import ChannelResolver, Ledger, OverlayController, blackout_target
-from .status import StatusWriter, build_status
+from .status import StatusWriter, build_status, load_events, recent_events
 from .trigger import BLACKOUT, IDLE, Inputs, TriggerEngine, evaluate_zone
 
 ONLINE_LAG_NOTICE = (
@@ -86,6 +86,7 @@ class Daemon:
         self.resolver = ChannelResolver(api, self.notifier, clock)
         self.matrix = MatrixController(api, self.ledger, clock)
         self.status_writer = StatusWriter(paths.status_file, clock)
+        self._events = load_events(paths.status_file)
 
         self._in_schedule = False
         self._last_schedule_read = None
@@ -217,10 +218,18 @@ class Daemon:
         }
         if transition.to_state == BLACKOUT and transition.from_state != BLACKOUT:
             self.notifier.emit("blackout_started", details)
+            self._record_event("started", transition.reason, aircraft)
         elif transition.from_state == BLACKOUT and transition.to_state != BLACKOUT:
             self.notifier.emit("blackout_cleared", details)
+            self._record_event("ended", transition.reason, aircraft)
         else:
             _logger.info("state %s reason %s aircraft %s", transition.to_state, transition.reason, aircraft)
+
+    def _record_event(self, kind, reason, aircraft):
+        self._events = recent_events(
+            self._events,
+            {"at": self._wall_clock(), "type": kind, "reason": reason, "aircraft": aircraft},
+        )
 
     def _log_skips(self, zone, feed_state):
         ground = {record.hex for record in zone.ground_skipped} if zone else set()
@@ -339,6 +348,8 @@ class Daemon:
                 self._wall_clock(),
                 notices=(ONLINE_LAG_NOTICE,) if self.settings.uses_online else (),
                 message_test=self._message_test,
+                events=self._events,
+                held_channels=sorted(self.overlay.held),
             )
         )
 

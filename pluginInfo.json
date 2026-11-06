@@ -2,7 +2,7 @@
 	"repoName": "fpp-plugin-SkyGuard",
 	"name": "SkyGuard",
 	"author": "mvgoodwin78",
-	"description": "Blacks out moving-head light output when aircraft are within a set radius, using a local ADS-B receiver or online flight data. If you use online data, your show's location and search radius go to the provider you choose (opendata.adsb.fi or api.adsb.lol). For personal use only: it does nothing until you confirm that. A typed address goes to nominatim.openstreetmap.org only when you press Look up.",
+	"description": "Blacks out moving-head light output when aircraft are within a set radius, using a local ADS-B receiver or online flight data. If you use online data, your show's location and search radius go to the provider you choose (opendata.adsb.fi or api.adsb.lol). For personal use only: it does nothing until you confirm that. A typed address goes to nominatim.openstreetmap.org only when you press Look up. While its map is open, your browser loads map images from tile.openstreetmap.org, unless you clear the map address.",
 	"homeURL": "https://github.com/mvgoodwin78/fpp-plugin-SkyGuard",
 	"srcURL": "https://github.com/mvgoodwin78/fpp-plugin-SkyGuard.git",
 	"bugURL": "https://github.com/mvgoodwin78/fpp-plugin-SkyGuard/issues",
@@ -11,8 +11,14 @@
 	"allowUpdates": 1,
 	"releaseNotesStyle": "gitHistory",
 	"privacy": {
-		"summary": "Blacks out moving heads when aircraft are near. It can send your show's location to an online flight data service, and a typed address to OpenStreetMap when you press Look up.",
+		"summary": "Blacks out moving heads when aircraft are near. Can send your location to a flight data service and a typed address to OpenStreetMap. Your browser loads map images from OpenStreetMap.",
 		"sends": [
+			{
+				"to": "tile.openstreetmap.org",
+				"what": "your browser's address and the map area around your show",
+				"why": "to draw the map on SkyGuard's pages, unless you clear the map address",
+				"alwaysOn": true
+			},
 			{
 				"to": "api.adsb.lol",
 				"what": "your show's location and search radius",

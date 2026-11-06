@@ -19,6 +19,10 @@ if [ "${FPP_PLUGIN_REINSTALL:-0}" != "1" ]; then
     rm -f "${MEDIADIR}/config/plugin.fpp-plugin-SkyGuard"
 fi
 
+if [ -x "${FPPDIR}/scripts/ManageApacheContentPolicy.sh" ]; then
+    "${FPPDIR}/scripts/ManageApacheContentPolicy.sh" remove img-src https://tile.openstreetmap.org 2>/dev/null || true
+fi
+
 # As in fpp_install.sh: before FPP 10, removing the commands needs an fppd restart.
 FPP_MAJOR="$("${FPPBINDIR:-${FPPDIR}/src}/fpp" -V 2>/dev/null | grep -oE '[0-9]+\.[0-9]+' | head -n 1 | cut -d. -f1 || true)"
 if [ -z "${FPP_MAJOR}" ] || [ "${FPP_MAJOR}" -lt 10 ]; then

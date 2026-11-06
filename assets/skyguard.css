@@ -1,0 +1,115 @@
+/* SkyGuard's own styling. Colors come only from Bootstrap's variables, so both themes work. */
+
+.skyguard-map-area {
+    height: min(60vh, 480px);
+    min-height: 280px;
+    border: 1px solid var(--bs-border-color);
+    border-radius: var(--bs-border-radius);
+    overflow: hidden;
+    position: relative;
+    z-index: 0; /* keeps Leaflet's panes under FPP's menus */
+}
+
+.skyguard-map-area-small {
+    height: min(45vh, 340px);
+    min-height: 220px;
+}
+
+.skyguard-zone {
+    stroke: var(--bs-danger);
+    fill: var(--bs-danger);
+}
+
+.skyguard-center-dot {
+    stroke: var(--bs-body-bg);
+    fill: var(--bs-primary);
+}
+
+.skyguard-plane {
+    width: 24px;
+    height: 24px;
+}
+
+.skyguard-plane svg {
+    width: 100%;
+    height: 100%;
+    display: block;
+    overflow: visible;
+}
+
+.skyguard-plane-shape {
+    fill: var(--bs-primary);
+    stroke: var(--bs-body-bg);
+    stroke-width: 1;
+}
+
+.skyguard-plane-zone .skyguard-plane-shape {
+    fill: var(--bs-danger);
+}
+
+.skyguard-plane-ignored .skyguard-plane-shape {
+    fill: var(--bs-secondary);
+}
+
+.leaflet-tooltip.skyguard-label {
+    font-size: 0.72rem;
+    line-height: 1.15;
+    white-space: nowrap;
+    background: var(--bs-body-bg);
+    color: var(--bs-body-color);
+    border: 1px solid var(--bs-border-color);
+    box-shadow: none;
+    padding: 1px 4px;
+}
+
+.leaflet-tooltip.skyguard-label::before {
+    display: none;
+}
+
+/* The radar plot */
+
+.skyguard-radar {
+    display: block;
+    width: 100%;
+    height: 100%;
+    background: var(--bs-tertiary-bg);
+}
+
+.skyguard-radar-ring {
+    fill: none;
+    stroke: var(--bs-border-color);
+    stroke-width: 0.5;
+}
+
+.skyguard-radar-zone {
+    fill: var(--bs-danger);
+    fill-opacity: 0.12;
+    stroke: var(--bs-danger);
+    stroke-width: 0.8;
+}
+
+.skyguard-radar-axis {
+    stroke: var(--bs-border-color);
+    stroke-width: 0.3;
+}
+
+.skyguard-radar-text {
+    fill: var(--bs-body-color);
+    font-size: 5px;
+}
+
+.skyguard-radar-plane {
+    fill: var(--bs-primary);
+}
+
+.skyguard-radar-plane-zone {
+    fill: var(--bs-danger);
+}
+
+.skyguard-radar-plane-ignored {
+    fill: var(--bs-secondary);
+}
+
+.skyguard-radar-center {
+    fill: var(--bs-primary);
+}

@@ -85,8 +85,6 @@ fpp-plugin-SkyGuard/
     supervisor.py          # restarts the daemon with capped backoff
     commands.py            # command spool between FPP commands and the daemon
     release.py             # releases everything the ledger holds, for uninstall
-  js/
-    skyguard-settings.js   # settings page; FPP loads everything in js/ on the plugin's pages
     config.py              # settings load/reload
     feeds/
       base.py              # normalized record + shared parsing
@@ -101,6 +99,13 @@ fpp-plugin-SkyGuard/
     matrix.py              # text overlay messages
     notifier.py            # events + sinks
     status.py              # atomic status JSON writer
+  skyguard_assets.inc      # writes the versioned tags for assets/
+  assets/
+    skyguard-settings.js   # settings page
+    skyguard-status.js     # status page
+    skyguard-map.js        # the map and radar plot both pages use
+    skyguard.css
+    leaflet/               # Leaflet 1.9.4, unchanged, with its license
   tests/                   # unit tests + mock feed server
 ```
 
@@ -409,7 +414,7 @@ A `callbacks` script is required so commands live-register on install without an
 
 Served through the template's `api.php` at `/api/plugin/fpp-plugin-SkyGuard/status`, reading a status JSON the daemon rewrites (atomic write in `plugindata/`). It writes at once when the state, reason, enabled setting, show window, active feed, in-zone count or warnings change, and otherwise every 5 s. That matches the 5 s map refresh and spares the SD card a write every second all year.
 
-Fields: `state`, `reason`, `enabled`, `in_schedule`, `active_feed`, `receiver_ok`, `last_data_age_s`, `aircraft_in_zone`, `center`, `radius`, `aircraft[]` (normalized records with `distance` and `in_zone`), `fixtures[]` (name, resolved channels, valid), `warnings[]`, `notices[]`, `updated_at`. `radius` carries the `value` in force for the active feed, its `unit`, and the `online` and `receiver` settings.
+Fields: `state`, `reason`, `enabled`, `in_schedule`, `active_feed`, `receiver_ok`, `last_data_age_s`, `aircraft_in_zone`, `center`, `radius`, `aircraft[]` (normalized records with `distance` and `in_zone`), `fixtures[]` (name, resolved channels, valid), `warnings[]`, `notices[]`, `message_test`, `events[]`, `held_channels[]`, `updated_at`. `held_channels` lists the channels being forced right now; FPP has no call that reads an overlay range back, so this is how the page and a test can tell. `events` is the last 20 blackout starts and ends, each with `at`, `type` (`started` or `ended`), `reason` and at most 10 `aircraft`, kept across a daemon restart by reading them back from the status file. `radius` carries the `value` in force for the active feed, its `unit`, and the `online` and `receiver` settings.
 
 Each `aircraft[]` record also carries `ground_ignored`, and a `note` of `ground (ignored)` when that is true.
 
@@ -455,6 +460,7 @@ Every setting below lives in `config/plugin.fpp-plugin-SkyGuard` except the fixt
 | `matrix_message` | "Aircraft overhead: {callsign} at {altitude} ft" | Custom text with placeholders |
 | `matrix_nodata_message` | "Aircraft data offline – lights paused" | Empty = none |
 | `matrix_color` / `matrix_font` / `matrix_size` / `matrix_position` / `matrix_speed` | `#FF0000` / empty, meaning `FreeSansBold` or another plain font if FPP lists one, otherwise the first it lists / 18 / `Right to Left` / 40 | Fonts from `GET /api/overlays/fonts` |
+| `map_tile_url` | `https://tile.openstreetmap.org/{z}/{x}/{y}.png` | Map background, used by the browser. Empty, or anything but an `https` address with `{z}`, `{x}` and `{y}`, shows only the radar plot and contacts no map service. Another host also needs allowing in FPP's content policy, or the tiles fail and the radar plot shows |
 | `geocoder` | `nominatim` | `nominatim` or `off`. The policy requires a way to switch it off without a software update. Send an identifying User-Agent, at most 1 request/s, no autocomplete, and don't repeat identical queries |
 
 ## pluginInfo.json and privacy
@@ -478,7 +484,7 @@ A `privacy` block is required for listing; generate it with the [Privacy disclos
 | Stored location | Home latitude/longitude stored locally in `plugindata/` and returned by the status endpoint to anyone who can reach FPP |
 | Online flight feed | Center point and radius sent to the chosen provider on every online poll: every 1–2 s during a show and about every 30 s otherwise, and never while disabled or with no center set. Not alwaysOn |
 | Geocoding | Typed address sent to the geocoding service, only when the user presses lookup |
-| Map tiles | Added in phase 1b, not yet in the block because the map doesn't exist yet. The viewer's browser loads map tiles from `tile.openstreetmap.org` while the status or location map is open. Needs `ManageApacheContentPolicy.sh add img-src`, and a `sends` entry with `what`: "your browser's address" |
+| Map tiles | The viewer's browser loads map tiles from `tile.openstreetmap.org` while the status page or Location & Zone tab is open. `fpp_install.sh` runs `ManageApacheContentPolicy.sh add img-src`, `fpp_uninstall.sh` removes it, and the `sends` entry says "your browser's address and the map area around your show", because the tiles requested reveal roughly where the show is |
 | Local receiver | Requests to a user-entered address on the LAN |
 | API key | Optional third-party key stored locally |
 | No telemetry | Nothing sent anywhere else; no usage data collected |
@@ -512,6 +518,7 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 - Phone-first: works from a 320 px phone to desktop with no horizontal page scroll; finger-sized tap targets, no hover-only actions.
 - Settings save FPP-style, each field on change.
 - Units: imperial by default (mi, ft, kt), metric selectable (`units` setting).
+- **No `js/` or `css/` folder.** FPP sends plugin files with `Cache-Control: max-age=31536000`, and the tags it writes for those two folders have no version, so an update wouldn't reach a browser that has been here before. Seen on the spare Pi: a computer kept an old script while a phone had the new one. Pages load from `assets/` through `skyguard_assets.inc`, which adds the file's modification time to the address.
 - Bundle any JavaScript library inside the plugin rather than loading it from a CDN at runtime. The map uses Leaflet (BSD-2-Clause; keep its license notice).
 - Map tiles: show the OpenStreetMap attribution visibly on the map, keep the tile URL configurable, and don't prefetch or store tiles. Confirm FPP's pages send a valid Referer, which the tile policy requires. When adsb.fi is the selected provider, credit and link it.
 
@@ -548,11 +555,11 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 Top to bottom on a phone:
 
 1. **State badge:** CLEAR, BLACKOUT or IDLE with its reason, in Bootstrap semantic colors.
-2. **Controls:** Enable/Disable switch (confirmation before disabling) and Test Trigger button.
+2. **Controls:** Enable/Disable button (confirmation before disabling), Test Trigger button (off while disabled) and the aircraft list button.
 3. **Map:** center point, radius circle, aircraft icons rotated to heading and labeled with callsign, altitude and speed; in-zone aircraft highlighted; skipped ones marked `ground (ignored)`. Refreshes every 5 s from the status endpoint.
 4. **No-internet fallback:** if map tiles don't load, a theme-aware radar plot (range rings, radius circle, aircraft dots) drawn from the same data.
-5. **Aircraft list button:** opens a full-screen list (callsign, altitude, speed, distance, in zone, or `ground (ignored)`) with a back button; same 5 s refresh.
-6. **Health:** active feed, receiver health, data age, aircraft count, per-fixture status, current warnings.
+5. **Aircraft list:** a full-screen list (callsign, altitude, speed, distance, in zone, or `ground (ignored)`) with a Back button, which the browser's own back also closes; same 5 s refresh.
+6. **Health:** active feed, receiver health, data age, aircraft count, whether a show is running, per-fixture status (including "Held dark" from `held_channels`). Current warnings sit under the state badge.
 7. **Recent events:** last 20 blackout transitions with time, reason and aircraft.
 
 ### Help page
@@ -567,7 +574,7 @@ Setup walkthrough, how the blackout works (which channels, fail-safe behavior), 
 - `api.php` gains `GET`/`PUT private` for the center and API key, which never returns the key, only `api_key_set`; and `POST test-receiver` and `POST test-online`, which report a count or an error and never pass a response on. `test-online` needs personal use confirmed and a center, and is limited to one request every 5 s.
 - Every write route requires `Content-Type: application/json`, so a page on another site can't send one as a simple request. Free-text settings refuse `"` and `\\`, because FPP 9.5 writes settings into an inline script without escaping them.
 - A `no_fixtures` warning shows while enabled and confirmed with no head that resolves to a channel, cleared by `fixtures_set`.
-- New settings: `units`, `setup_state`.
+- New settings: `units`, `setup_state`, `map_tile_url`.
 
 ## Verification results
 

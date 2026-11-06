@@ -1,5 +1,4 @@
-/* SkyGuard's settings page. FPP loads everything in js/ on all of this plugin's pages,
-   so nothing happens unless the settings page is the one showing. */
+/* SkyGuard's settings page. content.php loads it, with a version in its address. */
 
 /* Called by FPP's PrintSetting helpers after a value saves, so it must be global. */
 function skyGuardSettingSaved(key) {
@@ -18,7 +17,8 @@ function skyGuardSettingSaved(key) {
     var DEFAULTS = {
         matrix_message: 'Aircraft overhead: {callsign} at {altitude} ft',
         matrix_nodata_message: 'Aircraft data offline – lights paused',
-        matrix_color: '#FF0000'
+        matrix_color: '#FF0000',
+        map_tile_url: window.SkyGuardMap ? SkyGuardMap.DEFAULT_TILES : ''
     };
 
     var PLACEHOLDERS = {
@@ -114,6 +114,8 @@ function skyGuardSettingSaved(key) {
     /* ---- warnings from the running plugin ---- */
 
     var fixtureProblems = {};
+    var latestStatus = null;
+    var locationMap = null;
 
     function refreshStatus() {
         return request('GET', API + 'status').then(function (status) {
@@ -135,6 +137,10 @@ function skyGuardSettingSaved(key) {
                 fixtureProblems[fixture.id] = fixture.problem;
             });
             updateFixtureBadges();
+            latestStatus = status;
+            if (locationMap) {
+                locationMap.update(status);
+            }
         }).catch(function () {
             /* The next refresh tries again. */
         });
@@ -388,12 +394,12 @@ function skyGuardSettingSaved(key) {
 
         var actions = document.createElement('div');
         actions.className = 'd-flex flex-wrap gap-1';
-        actions.appendChild(makeButton('Test', 'btn btn-sm btn-outline-secondary', function () {
+        actions.appendChild(makeButton('Test', 'btn btn-sm btn-secondary', function () {
             runCommand('SkyGuard Test Trigger', ['3', row.id]).then(function () {
                 toast('Testing this head for 3 seconds.');
             }).catch(showError);
         }));
-        actions.appendChild(makeButton('Duplicate', 'btn btn-sm btn-outline-secondary', function () {
+        actions.appendChild(makeButton('Duplicate', 'btn btn-sm btn-secondary', function () {
             var copy = Object.assign({}, row);
             delete copy.id;
             copy.name = (row.name || 'Head') + ' copy';
@@ -457,7 +463,7 @@ function skyGuardSettingSaved(key) {
         var box = byId('skyGuardPlaceholders');
         var field = byId('skyGuardMessage');
         Object.keys(PLACEHOLDERS).forEach(function (key) {
-            box.appendChild(makeButton('{' + key + '}', 'btn btn-sm btn-outline-secondary', function () {
+            box.appendChild(makeButton('{' + key + '}', 'btn btn-sm btn-secondary', function () {
                 var start = field.selectionStart === null ? field.value.length : field.selectionStart;
                 var end = field.selectionEnd === null ? field.value.length : field.selectionEnd;
                 field.value = field.value.slice(0, start) + '{' + key + '}' + field.value.slice(end);
@@ -688,6 +694,33 @@ function skyGuardSettingSaved(key) {
         });
     }
 
+    /* ---- the map on the Location & Zone tab ---- */
+
+    /* Made when the tab first opens, so no map tiles load until someone looks at it. */
+    function setupLocationMap() {
+        var link = document.querySelector('a[href="#skyGuardTabLocation"]');
+        link.addEventListener('shown.bs.tab', function () {
+            if (locationMap) {
+                locationMap.resize();
+                return;
+            }
+            readSetting('map_tile_url').then(function (value) {
+                locationMap = SkyGuardMap.create({
+                    box: byId('skyGuardLocationMap'),
+                    note: byId('skyGuardLocationMapNote'),
+                    tiles: SkyGuardMap.usableTiles(value),
+                    aircraft: false,
+                    units: function () {
+                        return 'imperial';
+                    }
+                });
+                if (latestStatus) {
+                    locationMap.update(latestStatus);
+                }
+            }).catch(showError);
+        });
+    }
+
     /* ---- first-run setup ---- */
 
     function showTab(id) {
@@ -854,6 +887,8 @@ function skyGuardSettingSaved(key) {
         setupModels();
         setupColorAndFont();
         setupMessageTest();
+        setupFreeText('skyGuardTileUrl', 'map_tile_url');
+        setupLocationMap();
 
         runTest('skyGuardTestReceiver', 'skyGuardTestReceiverResult', API + 'test-receiver',
             urlBody('skyGuardReceiverUrl', 'skyGuardTestReceiverResult'));

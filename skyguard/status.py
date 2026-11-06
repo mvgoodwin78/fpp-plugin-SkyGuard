@@ -3,6 +3,7 @@
 It contains no API key. It does contain the center point, because the map needs it.
 """
 
+import json
 import logging
 
 from .feeds.base import GROUND
@@ -12,6 +13,8 @@ from .overlay import atomic_write_json
 
 DISPLAY_RANGE_RADII = 2.0
 PERIODIC_WRITE_S = 5.0  # matches the 5 s map refresh, and spares the SD card a write per second
+MAX_EVENTS = 20
+MAX_EVENT_AIRCRAFT = 10
 
 _logger = logging.getLogger(LOGGER_NAME)
 
@@ -44,6 +47,25 @@ def _in_display_range(evaluated, radius_nm):
     return evaluated.distance_nm <= radius_nm * DISPLAY_RANGE_RADII
 
 
+def recent_events(events, event):
+    """The list with one more on the end, the oldest dropped, so the file can't keep growing."""
+    event = {**event, "aircraft": list(event["aircraft"])[:MAX_EVENT_AIRCRAFT]}
+    return [*events, event][-MAX_EVENTS:]
+
+
+def load_events(path):
+    """The last run's events, so a restart doesn't lose them. Anything unusable means none."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            events = json.load(handle).get("events")
+    except (OSError, ValueError, AttributeError):
+        return []
+    if not isinstance(events, list):
+        return []
+    usable = [e for e in events if isinstance(e, dict) and isinstance(e.get("aircraft"), list)]
+    return usable[-MAX_EVENTS:]
+
+
 def build_status(
     state,
     reason,
@@ -57,6 +79,8 @@ def build_status(
     updated_at,
     notices=(),
     message_test=False,
+    events=(),
+    held_channels=(),
 ):
     aircraft = zone.aircraft if zone is not None else ()
     feed = feed_state.active_feed
@@ -94,6 +118,8 @@ def build_status(
         "warnings": list(warnings),
         "notices": list(notices),
         "message_test": message_test,
+        "events": list(events),
+        "held_channels": list(held_channels),
         "updated_at": updated_at,
     }
 
@@ -118,6 +144,8 @@ class StatusWriter:
             doc["aircraft_in_zone"],
             tuple(doc["warnings"]),
             doc["message_test"],
+            doc["events"][-1]["at"] if doc["events"] else None,
+            tuple(doc["held_channels"]),
             tuple((f["id"], f["name"], f["valid"], f["problem"]) for f in doc["fixtures"]),
         )
 
