@@ -23,6 +23,8 @@ class FakeFpp:
         self.fail_settings = False
         self.on_setting = None
         self.status = {"status": 0, "status_name": "idle", "scheduler": {"status": "idle"}}
+        self.bridge_stats = {"universes": []}
+        self.bridge_stats_status = 200
         self.universes = {"channelOutputs": []}
         self.universes_status = 200
         self.fonts = ["Helvetica", "Courier"]
@@ -86,6 +88,8 @@ class FakeFpp:
     def route(self, method, path, body):
         if path == "/api/fppd/status":
             return 200, self.status
+        if path == "/api/fppd/e131stats":
+            return self.bridge_stats_status, self.bridge_stats
         if path == "/api/channel/output/universeOutputs":
             return self.universes_status, self.universes
         if path == "/api/overlays/fonts":

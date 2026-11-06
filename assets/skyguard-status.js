@@ -113,7 +113,7 @@
         var running = status.running !== false && !!status.state;
         toggle.disabled = !running;
         toggle.textContent = status.enabled ? 'Disable SkyGuard' : 'Enable SkyGuard';
-        toggle.className = status.enabled ? 'btn btn-danger' : 'btn btn-success';
+        toggle.className = status.enabled ? 'btn btn-danger' : 'btn btn-primary';
         byId('skyGuardTest').disabled = !(running && status.enabled);
     }
 

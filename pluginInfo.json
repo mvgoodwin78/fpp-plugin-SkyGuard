@@ -7,7 +7,6 @@
 	"srcURL": "https://github.com/mvgoodwin78/fpp-plugin-SkyGuard.git",
 	"bugURL": "https://github.com/mvgoodwin78/fpp-plugin-SkyGuard/issues",
 	"iconURL": "https://raw.githubusercontent.com/mvgoodwin78/fpp-plugin-SkyGuard/master/icon.png",
-	"private": true,
 	"allowUpdates": 1,
 	"releaseNotesStyle": "gitHistory",
 	"privacy": {
@@ -49,7 +48,7 @@
 				"what": "your show's location",
 				"about": "operator",
 				"keptDays": null,
-				"canDelete": false,
+				"canDelete": true,
 				"where": "plugindata/fpp-plugin-SkyGuard/private.json"
 			}
 		],

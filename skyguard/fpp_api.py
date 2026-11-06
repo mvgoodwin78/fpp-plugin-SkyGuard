@@ -18,6 +18,10 @@ _logger = logging.getLogger(LOGGER_NAME)
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
+# xLights can send little while a scene holds still, and staying in "show" is the safe side.
+BRIDGE_IDLE_S = 30.0
+
+
 class FppError(Exception):
     """FPP couldn't be reached, or refused the request."""
 
@@ -68,6 +72,9 @@ class FppApi:
 
     def get_status(self):
         return self._get_json("/api/fppd/status")
+
+    def get_bridge_stats(self):
+        return self._get_json("/api/fppd/e131stats")
 
     def get_universe_outputs(self):
         """The E1.31/Art-Net output configuration, or None if there isn't one."""
@@ -122,8 +129,60 @@ def in_schedule_from_status(status):
     return not (isinstance(name, str) and name.strip().lower() == "idle")
 
 
-def read_in_schedule(api):
-    try:
-        return in_schedule_from_status(api.get_status())
-    except FppError:
-        return True
+def bridge_packet_total(stats):
+    """Packets received across all inputs, or None if the stats can't be used."""
+    universes = stats.get("universes") if isinstance(stats, dict) else None
+    if not isinstance(universes, list):
+        return None
+    total = 0
+    for universe in universes:
+        count = universe.get("packetsReceived") if isinstance(universe, dict) else None
+        if isinstance(count, int) and not isinstance(count, bool):
+            total += count
+        elif isinstance(count, str) and count.isdigit():
+            total += int(count)
+    return total
+
+
+class ShowDetector:
+    """Decides from FPP's status whether a show is running.
+
+    FPP's `bridging` flag is set by the first packet and stays set until FPP restarts, so
+    alone it would call an old xLights session a show for days. While it's set, bridged data
+    only counts while the packet counters are moving, plus BRIDGE_IDLE_S. Anything that can't
+    be read counts as a show, failing safe.
+    """
+
+    def __init__(self, api, clock):
+        self._api = api
+        self._clock = clock
+        self._last_total = None
+        self._last_moved = None
+
+    def read(self):
+        try:
+            status = self._api.get_status()
+        except FppError:
+            return True
+        if not isinstance(status, dict):
+            return True
+        bridging = status.get("bridging") not in (None, False, 0, "0")
+        if in_schedule_from_status({**status, "bridging": False}):
+            return True
+        if not bridging:
+            self._last_total = None
+            return False
+        return self._bridge_data_arriving()
+
+    def _bridge_data_arriving(self):
+        try:
+            total = bridge_packet_total(self._api.get_bridge_stats())
+        except FppError:
+            return True
+        if total is None:
+            return True
+        now = self._clock()
+        if total != self._last_total:
+            self._last_total = total
+            self._last_moved = now
+        return now - self._last_moved < BRIDGE_IDLE_S

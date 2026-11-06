@@ -2,13 +2,14 @@
 
 import os
 import tempfile
+import time
 import unittest
 import urllib.error
 import urllib.request
 
 from skyguard.config import Settings, parse_fixture
 from skyguard.feeds.base import GROUND, AircraftRecord
-from skyguard.fpp_api import FppApi, FppError, in_schedule_from_status, read_in_schedule
+from skyguard.fpp_api import BRIDGE_IDLE_S, ShowDetector, bridge_packet_total, FppApi, FppError, in_schedule_from_status
 from skyguard.matrix import REFRESH_INTERVAL_S, MatrixController, fill_message
 from skyguard.overlay import Ledger, resolve_fixtures, universe_entries
 from skyguard.trigger import (
@@ -77,6 +78,95 @@ class ScheduleTests(unittest.TestCase):
         self.assertTrue(in_schedule_from_status({"status": 0, "status_name": 5}))
 
 
+class BridgingTests(unittest.TestCase):
+    """FPP's bridging flag never clears by itself, as seen on a real 10.3 box."""
+
+    IDLE = {"status": 0, "status_name": "idle", "scheduler": {"status": "idle"}, "bridging": True}
+    # The shape a real 10.3 box returned after DDP packets.
+    STATS = {"Message": "", "Status": "OK", "respCode": 200, "universes": [
+        {"bytesReceived": "240", "errors": "0", "id": "DDP", "packetsReceived": "80",
+         "startChannel": "200001-200003", "suppressedPackets": "-"},
+    ]}
+
+    def setUp(self):
+        self.fpp = FakeFpp()
+        self.addCleanup(self.fpp.stop)
+        self.now = 1000.0
+        self.fpp.status = self.IDLE
+        self.fpp.bridge_stats = self.STATS
+        self.detector = ShowDetector(FppApi(self.fpp.url, timeout_s=1.0), lambda: self.now)
+
+    def packets(self, count):
+        self.fpp.bridge_stats = {"universes": [{"id": "DDP", "packetsReceived": str(count)}]}
+
+    def test_counts_as_a_show_when_first_seen(self):
+        self.assertTrue(self.detector.read())
+
+    def test_stops_counting_once_packets_stop(self):
+        self.detector.read()
+        self.now += BRIDGE_IDLE_S - 1
+        self.assertTrue(self.detector.read())
+        self.now += 2
+        self.assertFalse(self.detector.read())
+
+    def test_keeps_counting_while_packets_arrive(self):
+        for count in range(100, 110):
+            self.packets(count)
+            self.now += BRIDGE_IDLE_S - 1
+            self.assertTrue(self.detector.read())
+
+    def test_new_packets_after_a_quiet_spell_count_again(self):
+        self.detector.read()
+        self.now += BRIDGE_IDLE_S + 1
+        self.assertFalse(self.detector.read())
+        self.packets(81)
+        self.assertTrue(self.detector.read())
+
+    def test_stats_cleared_by_hand_look_like_movement(self):
+        self.detector.read()
+        self.now += BRIDGE_IDLE_S + 1
+        self.packets(0)
+        self.assertTrue(self.detector.read())
+
+    def test_unreadable_stats_count_as_a_show(self):
+        self.detector.read()
+        self.now += BRIDGE_IDLE_S + 1
+        self.fpp.bridge_stats_status = 500
+        self.assertTrue(self.detector.read())
+        self.fpp.bridge_stats_status = 200
+        self.fpp.bridge_stats = {"Status": "OK"}
+        self.assertTrue(self.detector.read())
+
+    def test_a_playlist_still_counts_with_a_stuck_bridge_flag(self):
+        self.detector.read()
+        self.now += BRIDGE_IDLE_S + 1
+        self.assertFalse(self.detector.read())
+        self.fpp.status = {**self.IDLE, "status": 1, "status_name": "playing"}
+        self.assertTrue(self.detector.read())
+
+    def test_stats_are_only_read_while_the_flag_is_set(self):
+        self.fpp.status = {**self.IDLE, "bridging": False}
+        self.fpp.requests.clear()
+        self.assertFalse(self.detector.read())
+        self.assertNotIn("/api/fppd/e131stats", [r[1] for r in self.fpp.requests])
+
+    def test_a_restart_clearing_the_flag_starts_again(self):
+        self.detector.read()
+        self.now += BRIDGE_IDLE_S + 1
+        self.detector.read()
+        self.fpp.status = {**self.IDLE, "bridging": False}
+        self.assertFalse(self.detector.read())
+        self.fpp.status = self.IDLE
+        self.assertTrue(self.detector.read())
+
+    def test_the_total_ignores_entries_with_no_count(self):
+        stats = {"universes": [{"packetsReceived": "5"}, {"packetsReceived": "-"}, {"packetsReceived": 2}, "junk", {}]}
+        self.assertEqual(bridge_packet_total(stats), 7)
+        self.assertEqual(bridge_packet_total({"universes": []}), 0)
+        for unusable in (None, [], {"universes": "x"}):
+            self.assertIsNone(bridge_packet_total(unusable))
+
+
 class FppApiTests(unittest.TestCase):
     def setUp(self):
         self.fpp = FakeFpp()
@@ -84,15 +174,15 @@ class FppApiTests(unittest.TestCase):
         self.api = FppApi(self.fpp.url, timeout_s=1.0)
 
     def test_status_is_read_from_fpps_real_route(self):
-        self.assertFalse(read_in_schedule(self.api))
+        self.assertFalse(ShowDetector(self.api, time.monotonic).read())
         self.assertEqual(self.fpp.requests[0][:2], ("GET", "/api/fppd/status"))
 
     def test_fpp_unreachable_counts_as_a_show(self):
         self.fpp.available = False
-        self.assertTrue(read_in_schedule(self.api))
+        self.assertTrue(ShowDetector(self.api, time.monotonic).read())
 
     def test_connection_refused_counts_as_a_show(self):
-        self.assertTrue(read_in_schedule(FppApi("http://127.0.0.1:1", timeout_s=0.2)))
+        self.assertTrue(ShowDetector(FppApi("http://127.0.0.1:1", timeout_s=0.2), time.monotonic).read())
 
     def test_errors_carry_the_status(self):
         self.fpp.available = False

@@ -494,6 +494,19 @@ class StatusForThePageTests(unittest.TestCase):
         self.assertEqual(load_events(self.r.paths.status_file), [])
 
 
+class StuckBridgeFlagTests(unittest.TestCase):
+    def test_an_old_session_stops_counting_as_a_show_and_the_heads_are_released(self):
+        r = Rig(self)
+        r.fpp.status = {**IDLE_STATUS, "bridging": True}
+        r.fpp.bridge_stats = {"universes": [{"id": "DDP", "packetsReceived": "80"}]}
+        r.aircraft = [plane()]
+        r.tick(steps=3)
+        self.assertEqual(r.state, "BLACKOUT")
+        r.tick(seconds=5, steps=8)
+        self.assertEqual((r.state, r.reason), ("IDLE", "schedule"))
+        self.assertEqual(r.fpp.output(A_DIMMER), 100)
+
+
 class OnlineCheckTests(unittest.TestCase):
     """Receiver radius 5 mi, online radius 10 mi, both feeds running during a show."""
 

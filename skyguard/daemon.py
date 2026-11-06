@@ -19,7 +19,7 @@ from dataclasses import replace
 from . import commands
 from .config import ConfigStore, Paths
 from .feed_manager import FeedManager
-from .fpp_api import BASE_URL, FppApi, FppError, read_in_schedule
+from .fpp_api import BASE_URL, FppApi, FppError, ShowDetector
 from .matrix import MatrixController
 from .notifier import LOGGER_NAME, LogSink, Notifier, WarningSink
 from .overlay import ChannelResolver, Ledger, OverlayController, blackout_target
@@ -87,6 +87,7 @@ class Daemon:
         self.resolver = ChannelResolver(api, self.notifier, clock)
         self.matrix = MatrixController(api, self.ledger, clock)
         self.status_writer = StatusWriter(paths.status_file, clock)
+        self._show = ShowDetector(api, clock)
         self._events = load_events(paths.status_file)
 
         self._in_schedule = False
@@ -190,7 +191,7 @@ class Daemon:
         due = self._last_schedule_read is None or now - self._last_schedule_read >= SCHEDULE_READ_S
         if due:
             self._last_schedule_read = now
-            self._in_schedule = read_in_schedule(self.api)
+            self._in_schedule = self._show.read()
             self.feed.set_in_schedule(self._in_schedule)
 
     def _evaluate(self, feed_state):

@@ -87,6 +87,22 @@ class PluginInfoTests(unittest.TestCase):
             self.assertIn(host, declared)
             self.assertIn(host, self.info["description"])
 
+    def test_it_is_listed_as_a_public_repo_with_no_template_leftovers(self):
+        self.assertNotIn("private", self.info)
+        for name in ("PLUGIN_GUIDELINES.md", "PLUGININFO_FORMAT.md", "PLUGIN_SELF_REVIEW.md", "pluginInfo.schema.json"):
+            self.assertFalse(os.path.exists(os.path.join(ROOT, name)), name)
+
+    def test_the_icon_is_a_size_fpp_accepts(self):
+        with open(os.path.join(ROOT, "icon.png"), "rb") as handle:
+            head = handle.read(24)
+        self.assertEqual(head[:8], b"\x89PNG\r\n\x1a\n")
+        self.assertIn((int.from_bytes(head[16:20], "big"), int.from_bytes(head[20:24], "big")), [(128, 128), (256, 256)])
+
+    def test_the_location_can_be_deleted_from_the_page_as_declared(self):
+        self.assertTrue(self.privacy["collects"][0]["canDelete"])
+        script = read("assets/skyguard-settings.js")
+        self.assertIn("saveCenter(lat === '' ? null : lat, lon === '' ? null : lon)", script)
+
     def test_nothing_is_marked_as_sending_on_its_own(self):
         self.assertEqual([send["to"] for send in self.privacy["sends"] if send["alwaysOn"]], ["tile.openstreetmap.org"])
 

@@ -351,7 +351,7 @@ function skyGuardSettingSaved(key) {
 
         var name = document.createElement('input');
         name.type = 'text';
-        name.className = 'form-control form-control-sm';
+        name.className = 'form-control form-control-sm skyguard-fixture-name';
         name.maxLength = 64;
         name.value = row.name || '';
         name.setAttribute('aria-label', 'Name');

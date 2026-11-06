@@ -28,7 +28,7 @@
     <fieldset class="border rounded p-3 mt-3">
         <legend>How a blackout works</legend>
         <ul>
-            <li><strong>It only happens during a show.</strong> A show means a playlist or sequence playing, including one you started by hand, or live E1.31 or Art-Net data driving the outputs. That last one means an xLights test session can black out the heads too. Outside a show the state is IDLE and the heads aren't touched, apart from your own tests.</li>
+            <li><strong>It only happens during a show.</strong> A show means a playlist or sequence playing, including one you started by hand, or live E1.31, Art-Net or DDP data arriving at FPP, and for 30 seconds after it stops. That last one means an xLights test session can black out the heads too. Outside a show the state is IDLE and the heads aren't touched, apart from your own tests.</li>
             <li><strong>It starts on the first poll</strong> that finds an aircraft in the zone, and ends once the zone has been clear for the release delay.</li>
             <li><strong>Altitude limits apply.</strong> An aircraft must be between your lowest and highest altitudes to count. If its altitude is unknown and it's inside the radius, it counts.</li>
             <li><strong>Aircraft with no position</strong> count as in the zone if their altitude is in range, unless you turn that off under Advanced.</li>
