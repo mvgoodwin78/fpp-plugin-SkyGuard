@@ -125,6 +125,11 @@ function skyGuardSettingSaved(key) {
             box.textContent = messages.join(' ');
             box.hidden = messages.length === 0;
 
+            /* Covers a page opened or reloaded while a test is running. */
+            if (Date.now() >= messageTestSettleUntil) {
+                showMessageTest(status.message_test === true);
+            }
+
             fixtureProblems = {};
             (status.fixtures || []).forEach(function (fixture) {
                 fixtureProblems[fixture.id] = fixture.problem;
@@ -493,6 +498,9 @@ function skyGuardSettingSaved(key) {
                         names.push(item.value);
                     });
                     saveSetting('matrix_models', names.join(',')).catch(showError);
+                    if (messageTestOn) {
+                        startLiveView();
+                    }
                 });
                 var label = document.createElement('label');
                 label.className = 'form-check-label mb-0';
@@ -502,9 +510,120 @@ function skyGuardSettingSaved(key) {
                 wrap.appendChild(label);
                 box.appendChild(wrap);
             });
+            if (messageTestOn) {
+                startLiveView();
+            }
         }).catch(function () {
             box.textContent = 'Could not read the overlay models from FPP.';
         });
+    }
+
+    /* ---- live view of a panel during a test ---- */
+
+    var LIVE_VIEW_POLL_MS = 250;
+    /* A status read just after pressing a button can be from before the daemon acted. */
+    var MESSAGE_TEST_SETTLE_MS = 3000;
+    var liveViewRun = 0;
+    var messageTestOn = false;
+    var messageTestSettleUntil = 0;
+
+    function pixelsInFrame(data, perPixel) {
+        var total = 0;
+        for (var i = 0; i < data.length; i += perPixel + 1) {
+            total += data[i];
+        }
+        return total;
+    }
+
+    /* FPP's run-length form: a count, then that pixel's channels, repeated. FPP 9.5 always
+       sends three channels, whatever the model has. */
+    function drawFrame(canvas, data, modelChannels) {
+        var total = canvas.width * canvas.height;
+        var perPixel = pixelsInFrame(data, modelChannels) === total ? modelChannels : 3;
+        var context = canvas.getContext('2d');
+        var image = context.createImageData(canvas.width, canvas.height);
+        var out = image.data;
+        var pixel = 0;
+        for (var i = 0; i + perPixel < data.length; i += perPixel + 1) {
+            var red = data[i + 1];
+            var green = perPixel >= 3 ? data[i + 2] : red;
+            var blue = perPixel >= 3 ? data[i + 3] : red;
+            for (var n = 0; n < data[i] && pixel < total; n++, pixel++) {
+                out[pixel * 4] = red;
+                out[pixel * 4 + 1] = green;
+                out[pixel * 4 + 2] = blue;
+            }
+        }
+        for (var alpha = 3; alpha < out.length; alpha += 4) {
+            out[alpha] = 255;
+        }
+        context.putImageData(image, 0, 0);
+    }
+
+    function stopLiveView() {
+        liveViewRun++;
+        byId('skyGuardLive').hidden = true;
+    }
+
+    /* Reads the panel's real pixels, so it shows what FPP holds, for only as long as the test. */
+    function startLiveView() {
+        var panel = byId('skyGuardModels').querySelector('input:checked');
+        stopLiveView();
+        if (!panel) {
+            return;
+        }
+        var name = panel.value;
+        var run = liveViewRun;
+        var box = byId('skyGuardLive');
+        var canvas = byId('skyGuardLiveCanvas');
+        var path = 'api/overlays/model/' + encodeURIComponent(name);
+
+        request('GET', path).then(function (model) {
+            if (run !== liveViewRun || !model.width || !model.height) {
+                return;
+            }
+            var channels = parseInt(model.ChannelCountPerNode, 10) || 3;
+            canvas.width = model.width;
+            canvas.height = model.height;
+            byId('skyGuardLiveLabel').textContent = 'Live view of ' + name;
+            box.hidden = false;
+
+            function poll() {
+                if (run !== liveViewRun) {
+                    return;
+                }
+                if (document.hidden) {
+                    setTimeout(poll, LIVE_VIEW_POLL_MS);
+                    return;
+                }
+                request('GET', path + '/data/rle').then(function (frame) {
+                    if (run === liveViewRun && Array.isArray(frame.data)) {
+                        drawFrame(canvas, frame.data, channels);
+                    }
+                }).catch(function () {
+                    /* The next poll tries again. */
+                }).then(function () {
+                    setTimeout(poll, LIVE_VIEW_POLL_MS);
+                });
+            }
+            poll();
+        }).catch(function () {
+            /* The test itself still ran; there's just no picture of it. */
+        });
+    }
+
+    function showMessageTest(on) {
+        if (on === messageTestOn) {
+            return;
+        }
+        messageTestOn = on;
+        byId('skyGuardMatrixStop').hidden = !on;
+        byId('skyGuardMatrixTest').disabled = on;
+        if (on) {
+            startLiveView();
+        } else {
+            stopLiveView();
+        }
     }
 
     function setupMessageTest() {
@@ -521,11 +640,20 @@ function skyGuardSettingSaved(key) {
                 lastSave.catch(function () {
                     return null;
                 }).then(function () {
-                    return runCommand('SkyGuard Test Message', ['15']);
+                    return runCommand('SkyGuard Test Message', []);
                 }).then(function () {
-                    toast('Showing the message for 15 seconds.');
+                    toast('Showing the message until you press Stop.');
+                    messageTestSettleUntil = Date.now() + MESSAGE_TEST_SETTLE_MS;
+                    showMessageTest(true);
                 }).catch(showError);
             }
+        });
+        byId('skyGuardMatrixStop').addEventListener('click', function () {
+            runCommand('SkyGuard Stop Test Message', []).then(function () {
+                toast('Test message stopped.');
+                messageTestSettleUntil = Date.now() + MESSAGE_TEST_SETTLE_MS;
+                showMessageTest(false);
+            }).catch(showError);
         });
     }
 

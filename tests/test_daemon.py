@@ -525,22 +525,45 @@ class MessageTestTests(unittest.TestCase):
     def panel(self):
         return self.r.fpp.models["Panel"]
 
-    def send(self, seconds=5):
-        commands.send_command(self.r.paths, commands.TEST_MESSAGE, seconds)
+    def start(self):
+        commands.send_command(self.r.paths, commands.TEST_MESSAGE)
         self.r.wall = time.time()
 
-    def test_it_shows_sample_values_then_clears_and_restores_the_panel(self):
-        self.send()
+    def stop(self):
+        commands.send_command(self.r.paths, commands.STOP_TEST_MESSAGE)
+        self.r.wall = time.time()
+
+    def warned(self):
+        return any("test message" in w for w in self.r.status()["warnings"])
+
+    def test_it_shows_sample_values_until_stopped_then_restores_the_panel(self):
+        self.start()
         self.r.tick(REFRESH_INTERVAL_S)
         self.assertEqual(self.panel()["effect"], "N123AB 2")
         self.assertEqual(self.panel()["state"], 1)
-        self.r.tick(REFRESH_INTERVAL_S, steps=3)
+        self.r.tick(3600)
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertEqual(self.panel()["effect"], "N123AB 2")
+        self.stop()
+        self.r.tick(REFRESH_INTERVAL_S)
         self.assertIsNone(self.panel()["effect"])
         self.assertEqual(self.panel()["state"], 0)
         self.assertEqual(self.r.daemon.ledger.matrix, {})
 
+    def test_the_status_says_it_is_running_and_warns(self):
+        self.assertFalse(self.r.status()["message_test"])
+        self.assertFalse(self.warned())
+        self.start()
+        self.r.tick()
+        self.assertTrue(self.r.status()["message_test"])
+        self.assertTrue(self.warned())
+        self.stop()
+        self.r.tick()
+        self.assertFalse(self.r.status()["message_test"])
+        self.assertFalse(self.warned())
+
     def test_the_heads_are_not_touched(self):
-        self.send()
+        self.start()
         self.r.tick()
         self.assertEqual(self.r.fpp.ranges, {})
         self.assertEqual(self.r.state, "CLEAR")
@@ -548,53 +571,65 @@ class MessageTestTests(unittest.TestCase):
     def test_it_works_while_disabled(self):
         self.r.write_settings(enabled=0)
         self.r.tick()
-        self.send()
+        self.start()
         self.r.tick(REFRESH_INTERVAL_S)
         self.assertEqual(self.panel()["effect"], "N123AB 2")
 
     def test_it_needs_the_confirmation(self):
         self.r.write_settings(personal_use_confirmed=0)
         self.r.tick()
-        self.send()
+        self.start()
         self.r.tick(REFRESH_INTERVAL_S)
         self.assertIsNone(self.panel()["effect"])
-
-    def test_a_request_made_before_confirming_does_not_fire_after(self):
-        self.r.write_settings(personal_use_confirmed=0)
-        self.r.tick()
-        self.send(60)
-        self.r.tick(REFRESH_INTERVAL_S)
-        self.r.write_settings(personal_use_confirmed=1)
-        self.r.tick(REFRESH_INTERVAL_S)
-        self.assertIsNone(self.panel()["effect"])
+        self.assertFalse(self.r.status()["message_test"])
 
     def test_withdrawing_the_confirmation_ends_it(self):
-        self.send(60)
+        self.start()
         self.r.tick(REFRESH_INTERVAL_S)
         self.assertEqual(self.panel()["effect"], "N123AB 2")
         self.r.write_settings(personal_use_confirmed=0)
         self.r.tick(REFRESH_INTERVAL_S)
         self.assertIsNone(self.panel()["effect"])
+        self.r.write_settings(personal_use_confirmed=1)
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertIsNone(self.panel()["effect"])
 
-    def test_a_real_message_wins(self):
+    def test_a_real_message_wins_and_the_test_returns_after(self):
         self.r.write_settings(matrix_enabled=1)
         self.r.tick()
-        self.send(60)
+        self.start()
         self.r.aircraft = [plane(flight="REAL1 ")]
         self.r.tick(REFRESH_INTERVAL_S)
         self.assertEqual(self.panel()["effect"], "REAL1 1")
+        self.r.aircraft = []
+        self.r.tick(REFRESH_INTERVAL_S, steps=5)
+        self.assertEqual(self.panel()["effect"], "N123AB 2")
 
     def test_no_panels_means_nothing_is_sent(self):
         self.r.write_settings(matrix_models="")
         self.r.tick()
-        self.send()
+        self.start()
         self.r.tick(REFRESH_INTERVAL_S)
         self.assertEqual(self.r.fpp.commands, [])
 
     def test_an_old_request_does_not_fire(self):
-        commands.send_command(self.r.paths, commands.TEST_MESSAGE, 5)
+        commands.send_command(self.r.paths, commands.TEST_MESSAGE)
         self.r.wall = time.time() + 120
         self.r.tick(REFRESH_INTERVAL_S)
+        self.assertIsNone(self.panel()["effect"])
+
+    def test_an_old_stop_still_stops(self):
+        self.start()
+        self.r.tick(REFRESH_INTERVAL_S)
+        commands.send_command(self.r.paths, commands.STOP_TEST_MESSAGE)
+        self.r.wall = time.time() + 120
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.assertIsNone(self.panel()["effect"])
+
+    def test_a_clean_shutdown_clears_it(self):
+        self.start()
+        self.r.tick(REFRESH_INTERVAL_S)
+        self.r.daemon.shutdown()
         self.assertIsNone(self.panel()["effect"])
 
 

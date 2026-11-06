@@ -25,6 +25,7 @@ _WARNING_MESSAGES = {
     "internal_error": "SkyGuard hit an unexpected error. During a show, the heads are held dark. See the plugin log.",
     "center_unset": "Set a center point. SkyGuard stays idle until you do.",
     "no_fixtures": "No moving heads are set up, so a blackout has nothing to black out.",
+    "message_test_on": "A test message is showing on the panels until you stop it on the Matrix Message tab.",
     "radius_unset": "Enter a radius for each data source in use. SkyGuard stays idle until you do.",
     "personal_use_required": "SkyGuard is for personal use only. It stays idle until you confirm this in its setup.",
 }
@@ -38,6 +39,7 @@ _RAISES = {
     "plugin_disabled": "plugin_disabled",
     "center_unset": "center_unset",
     "no_fixtures": "no_fixtures",
+    "message_test_on": "message_test_on",
     "radius_unset": "radius_unset",
     "personal_use_required": "personal_use_required",
     "overlay_failed": "overlay_failed",
@@ -54,6 +56,7 @@ _CLEARS = {
     "plugin_enabled": ("plugin_disabled",),
     "center_set": ("center_unset",),
     "fixtures_set": ("no_fixtures",),
+    "message_test_off": ("message_test_on",),
     "radius_set": ("radius_unset",),
     "personal_use_confirmed": ("personal_use_required",),
     "overlay_restored": ("overlay_failed",),

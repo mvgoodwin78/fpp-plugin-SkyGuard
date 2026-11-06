@@ -56,6 +56,7 @@ def build_status(
     warnings,
     updated_at,
     notices=(),
+    message_test=False,
 ):
     aircraft = zone.aircraft if zone is not None else ()
     feed = feed_state.active_feed
@@ -92,6 +93,7 @@ def build_status(
         ],
         "warnings": list(warnings),
         "notices": list(notices),
+        "message_test": message_test,
         "updated_at": updated_at,
     }
 
@@ -115,6 +117,7 @@ class StatusWriter:
             doc["active_feed"],
             doc["aircraft_in_zone"],
             tuple(doc["warnings"]),
+            doc["message_test"],
             tuple((f["id"], f["name"], f["valid"], f["problem"]) for f in doc["fixtures"]),
         )
 

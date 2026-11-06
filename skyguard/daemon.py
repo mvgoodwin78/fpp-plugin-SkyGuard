@@ -98,7 +98,7 @@ class Daemon:
         self._skipped_logged = 0
         self._error_active = False
         self._head_test = None  # (fixture id, end time) while one head is being tested
-        self._message_test_until = None  # end time while the panel message is being tested
+        self._message_test = False  # the panel message is being tested, until stopped
 
         self._matrix_lock = threading.Lock()
         self._matrix_request = None
@@ -170,11 +170,13 @@ class Daemon:
                 # Only touches the panels and sends nothing out, so it works while
                 # disabled, and before the message is switched on, to help set it up.
                 if self.settings.personal_use_confirmed:
-                    seconds = commands.test_seconds(command.get("seconds"))
-                    _logger.info("Test of the panel message for %s s", seconds)
-                    self._message_test_until = self._clock() + seconds
+                    _logger.info("Test of the panel message started")
+                    self._message_test = True
                 else:
                     _logger.info("Message test ignored because personal use isn't confirmed")
+            elif name == commands.STOP_TEST_MESSAGE:
+                _logger.info("Test of the panel message stopped")
+                self._message_test = False
             else:
                 self._pending_enabled = name == commands.ENABLE
                 _logger.info("SkyGuard %s command received", name)
@@ -281,6 +283,7 @@ class Daemon:
         target = blackout_target(resolved)
         self._hold_after_corrupt_ledger(target)
         self._report_fixture_setup(settings, target)
+        self._update_message_test()
         self.overlay.sync(self._channels_to_hold(now, resolved, target))
 
         self._request_matrix(zone, in_zone)
@@ -335,22 +338,21 @@ class Daemon:
                 warnings,
                 self._wall_clock(),
                 notices=(ONLINE_LAG_NOTICE,) if self.settings.uses_online else (),
+                message_test=self._message_test,
             )
         )
 
     # The matrix, on its own thread ----------------------------------------------
 
-    def _message_test_running(self):
-        if self._message_test_until is None:
-            return False
-        if self._clock() >= self._message_test_until or not self.settings.personal_use_confirmed:
-            self._message_test_until = None
-            return False
-        return True
+    def _update_message_test(self):
+        """It runs until stopped, so a warning keeps it from being forgotten before a show.
+        It isn't saved: a restart ends it, and the new daemon clears the panel from the ledger."""
+        if not self.settings.personal_use_confirmed:
+            self._message_test = False
+        self.notifier.emit("message_test_on" if self._message_test else "message_test_off")
 
     def _request_matrix(self, zone, in_zone):
         closest = zone.closest if zone else None
-        test_message = self._message_test_running()
         with self._matrix_lock:
             self._matrix_request = (
                 self.engine.state,
@@ -358,7 +360,7 @@ class Daemon:
                 closest,
                 len(in_zone),
                 self.settings,
-                test_message,
+                self._message_test,
             )
 
     def matrix_step(self):

@@ -70,7 +70,7 @@ fpp-plugin-SkyGuard/
   callbacks                # enables live command registration; lifecycle hook starts the daemon
   .gitattributes           # keeps scripts LF on any machine
   commands/
-    descriptions.json      # Enable, Disable, Test Trigger, Test Message
+    descriptions.json      # Enable, Disable, Test Trigger, Test Message, Stop Test Message
     skyguard_enable.py     # one executable per command (FPP passes no fixed argument)
     skyguard_disable.py
     skyguard_test.py
@@ -381,7 +381,7 @@ The header indicator is served from `api.php` at `/api/plugin/fpp-plugin-SkyGuar
 
 ## FPP commands and status API
 
-SkyGuard registers four FPP commands and serves one read-only status endpoint that the later UI and map view will use.
+SkyGuard registers five FPP commands and serves one read-only status endpoint that the later UI and map view will use.
 
 ### Commands (`commands/descriptions.json`)
 
@@ -390,7 +390,8 @@ SkyGuard registers four FPP commands and serves one read-only status endpoint th
 | SkyGuard Enable | none | Plugin evaluates normally (persisted setting) |
 | SkyGuard Disable | none | Releases all overlays, goes IDLE, raises a "SkyGuard disabled" warning so it's never off silently |
 | SkyGuard Test Trigger | seconds (default 10), optional fixture ID | Forces BLACKOUT for N seconds with reason `test`, including matrix message, then normal evaluation resumes. With a fixture ID, holds only that head dark for N seconds, without changing the state or showing a message |
-| SkyGuard Test Message | seconds (default 15) | Shows the message on the chosen panels for N seconds with sample values, without touching the heads or the state. Needs personal use confirmed. Works while disabled and while the matrix switch is off, because it only touches the panels and sends nothing out. A real blackout message wins |
+| SkyGuard Test Message | none | Shows the message on the chosen panels with sample values until stopped, without touching the heads or the state. Needs personal use confirmed. Works while disabled and while the matrix switch is off, because it only touches the panels and sends nothing out. A real blackout message wins, and the test returns afterwards. While it runs, the status has `message_test: true` and a warning shows, so it can't be forgotten before a show. It isn't saved: a daemon restart or an FPP restart ends it and clears the panel |
+| SkyGuard Stop Test Message | none | Ends the message test |
 
 Command scripts pass the request to the daemon through a spool folder, `plugindata/fpp-plugin-SkyGuard/commands/`: each drops a small JSON file and exits, and the daemon reads the folder every 0.25 s. A spool opens no port, so nothing new is reachable on the network. They must return quickly: fppd waits for each one to exit.
 
@@ -537,7 +538,7 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 | Data Source | Source mode; receiver URL and optional 978 URL with a Test button (shows aircraft seen or the error); online provider dropdown, masked API key field, Test button |
 | Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); Use my location button (disabled with a note when the page isn't HTTPS); display-only map of the center point and radius circle (no draggable pin); online radius and receiver radius as required entries with no pre-filled value, shown according to the data sources in use, and their unit; the lag notice when online data is selected; altitude floor and ceiling; "Ignore aircraft on the ground" switch |
 | Fixtures | Table, one row per head: name, universe or start channel, dimmer ch, dimmer off, shutter ch, shutter off, enabled. Add, duplicate, delete. Per-row Test button blacks out that head only for 3 s |
-| Matrix Message | Enable switch; panel picker from the FPP overlay model list; message field with click-to-insert placeholder buttons; live preview with sample values; a Test on panels button; no-data message; color, font, size, speed |
+| Matrix Message | Enable switch; panel picker from the FPP overlay model list; message field with click-to-insert placeholder buttons; live preview with sample values; Test on panels and Stop buttons, with a live view of the first ticked panel's real pixels during the test, also shown when the page is opened during one; no-data message; color, font, size, speed |
 | Advanced (collapsed) | Poll interval, online idle interval, health interval, fail count, max data age, release delay, count-no-position toggle, ground speed limit, units |
 
 **Fixture row validation:** a row takes effect only when its required fields are filled and valid. Until then it shows an "Incomplete" badge and the trigger engine ignores it. A row whose universe can't be resolved shows "Universe not found".
@@ -642,7 +643,7 @@ Phase 1 is done when every test below passes on a Pi 4 running FPP 9.5 and on cu
 - [ ] Both feeds down → blackout held, both-down warning shown
 - [ ] Outside schedule → IDLE, nothing overridden; schedule starts with an aircraft present → blackout on first poll
 - [ ] Matrix message appears with placeholders filled, updates, clears on release; shows on Virtual Display
-- [ ] Enable, Disable, Test Trigger and Test Message commands work from a playlist and from the Command API
+- [ ] Enable, Disable, Test Trigger, Test Message and Stop Test Message commands work from a playlist and from the Command API
 - [ ] Status endpoint returns all documented fields
 - [ ] fppd restart mid-blackout → daemon restarts and re-evaluates; no stuck overlays after uninstall
 - [ ] Daemon killed mid-blackout → heads stay dark; supervisor restarts it; it resumes with reason `resume` and releases only once the normal rules are met

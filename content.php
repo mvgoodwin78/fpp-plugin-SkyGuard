@@ -196,7 +196,12 @@ function skyGuardCheckbox($title, $setting, $default) {
             <div class="form-text">Preview: <span id="skyGuardPreview"></span></div>
             <div class="mt-2">
                 <button type="button" class="btn btn-sm btn-primary" id="skyGuardMatrixTest">Test on panels</button>
-                <div class="form-text">Shows the message on the panels ticked above for 15 seconds, with the sample values. The heads aren't affected.</div>
+                <button type="button" class="btn btn-sm btn-danger" id="skyGuardMatrixStop" hidden>Stop</button>
+                <div class="form-text">Shows the message on the panels ticked above, with the sample values, until you press Stop. The heads aren't affected.</div>
+                <div id="skyGuardLive" class="mt-2" hidden>
+                    <div class="form-text" id="skyGuardLiveLabel"></div>
+                    <canvas id="skyGuardLiveCanvas" class="w-100 border" style="max-width: 640px; image-rendering: pixelated;"></canvas>
+                </div>
             </div>
             <?php skyGuardRowClose(); ?>
             <?php skyGuardRowOpen('Message when data is offline', '', 'Leave empty for none.'); ?>

@@ -24,7 +24,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 REPO = "fpp-plugin-SkyGuard"
 HOOKS = ("fpp_install.sh", "fpp_uninstall.sh", "postStart.sh", "preStop.sh")
 SHELL_SCRIPTS = ("callbacks", *(f"scripts/{n}" for n in (*HOOKS, "skyguard_start.sh")))
-COMMAND_SCRIPTS = ("skyguard_enable.py", "skyguard_disable.py", "skyguard_test.py", "skyguard_test_message.py")
+COMMAND_SCRIPTS = ("skyguard_enable.py", "skyguard_disable.py", "skyguard_test.py", "skyguard_test_message.py",
+                   "skyguard_stop_test_message.py")
 EXECUTABLE = (*SHELL_SCRIPTS, *(f"commands/{n}" for n in COMMAND_SCRIPTS))
 
 
@@ -103,19 +104,22 @@ class CommandTests(unittest.TestCase):
         commands = load("commands/descriptions.json")
         self.assertEqual(
             [c["name"] for c in commands],
-            ["SkyGuard Enable", "SkyGuard Disable", "SkyGuard Test Trigger", "SkyGuard Test Message"],
+            ["SkyGuard Enable", "SkyGuard Disable", "SkyGuard Test Trigger", "SkyGuard Test Message",
+             "SkyGuard Stop Test Message"],
         )
         for command in commands:
             self.assertTrue(os.path.exists(os.path.join(ROOT, "commands", command["script"])))
 
     def test_the_message_test_script_sends_its_command(self):
-        doc = self.run_script("skyguard_test_message.py", "15")
-        self.assertEqual((doc["command"], doc["seconds"]), ("test_message", "15"))
+        self.assertEqual(self.run_script("skyguard_test_message.py")["command"], "test_message")
+        self.assertEqual(self.run_script("skyguard_stop_test_message.py")["command"], "stop_test_message")
 
-    def test_only_the_test_commands_take_an_argument(self):
+    def test_only_the_test_trigger_takes_an_argument(self):
         commands = {c["name"]: c for c in load("commands/descriptions.json")}
         self.assertEqual(commands["SkyGuard Enable"]["args"], [])
         self.assertEqual(commands["SkyGuard Disable"]["args"], [])
+        self.assertEqual(commands["SkyGuard Test Message"]["args"], [])
+        self.assertEqual(commands["SkyGuard Stop Test Message"]["args"], [])
         argument = commands["SkyGuard Test Trigger"]["args"][0]
         self.assertEqual((argument["min"], argument["max"], argument["default"]), (1, 3600, "10"))
         fixture = commands["SkyGuard Test Trigger"]["args"][1]
