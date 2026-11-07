@@ -202,7 +202,7 @@ The zone is one circle: a center lat/lon plus a radius, filtered by an altitude 
 ### Center point
 
 - Stored as decimal degrees (`center_lat`, `center_lon`) in `plugindata/fpp-plugin-SkyGuard/private.json`.
-- Set by manual entry, by address geocoding (backend calls a geocoding service on request only, result shown for the user to confirm), or by copying the latitude and longitude saved in FPP's own settings (UI side). The browser's location isn't used: browsers only share it over HTTPS, and FPP serves plain http. FPP's default location (Falcon, Colorado) is refused, and the page warns that FPP's own Lookup goes by public IP address and can be miles off.
+- Set by manual entry, by address geocoding (backend calls a geocoding service on request only, result shown for the user to confirm), and nothing else. The browser's location isn't used: browsers only share it over HTTPS, and FPP serves plain http. FPP's own saved location isn't offered either: its Lookup goes by public IP address and was found to be inaccurate (owner, Nov 7, 2026).
 
 ### Per-poll evaluation
 
@@ -555,7 +555,7 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 | Tab | Contents |
 | --- | --- |
 | Data Source | Source mode; receiver URL and optional 978 URL with a Test button (shows aircraft seen or the error); online provider dropdown, masked API key field, Test button |
-| Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); Use FPP's location button (copies FPP's saved latitude and longitude and saves them); display-only map of the center point and radius circle (no draggable pin); online radius and receiver radius as required entries with no pre-filled value, shown according to the data sources in use, and their unit; the lag notice when online data is selected; altitude floor and ceiling; "Ignore aircraft on the ground" switch |
+| Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); a note on finding coordinates in Google Maps; display-only map of the center point and radius circle (no draggable pin); online radius and receiver radius as required entries with no pre-filled value, shown according to the data sources in use, and their unit; the lag notice when online data is selected; altitude floor and ceiling; "Ignore aircraft on the ground" switch |
 | Fixtures | Table, one row per head: name, universe or start channel, dimmer ch, dimmer off, shutter ch, shutter off, enabled. Add, duplicate, delete. Per-row Test button blacks out that head only for 3 s |
 | Matrix Message | Enable switch; panel picker from the FPP overlay model list; message field with click-to-insert placeholder buttons; live preview with sample values; Test on panels and Stop buttons, with a live view of the first ticked panel's real pixels during the test, also shown when the page is opened during one; no-data message; color, font, size, speed |
 | Advanced (collapsed) | Poll interval, online idle interval, health interval, fail count, max data age, release delay, count-no-position toggle, ground speed limit, units |

@@ -128,9 +128,8 @@ function skyGuardCheckbox($title, $setting, $default) {
             </div>
             <div class="mt-2 d-flex flex-wrap gap-2">
                 <button type="button" class="btn btn-sm btn-primary" id="skyGuardCenterSave">Save center point</button>
-                <button type="button" class="btn btn-sm btn-secondary" id="skyGuardUseFppLocation">Use FPP's location</button>
             </div>
-            <div class="form-text" id="skyGuardLocationNote"></div>
+            <div class="form-text">Type your latitude and longitude, then press Save center point. To find them, right-click your house in Google Maps: the first line of the menu is the two numbers. Or look up your address below.</div>
             <?php skyGuardRowClose(); ?>
 
             <?php skyGuardRowOpen('Find an address', '', 'Sent to OpenStreetMap only when you press Look up.'); ?>
