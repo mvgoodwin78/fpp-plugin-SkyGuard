@@ -570,8 +570,9 @@ class LifecycleTests(unittest.TestCase):
         self.paths = Paths.from_env({"MEDIADIR": self.media})
         self.addCleanup(self.run_hook, "scripts/preStop.sh")
 
-    def set_fpp_version(self, version, answer=None):
-        """A stand-in for curl, giving the answer a real FPP 10.3 gave to /api/fppd/version."""
+    def set_fpp_version(self, version, answer=None, commands="[]"):
+        """A stand-in for curl, giving the answer a real FPP 10.3 gave to /api/fppd/version,
+        and `commands` for /api/commands."""
         major, minor = version.split(".")
         answer = answer or json.dumps({
             "Message": "", "Status": "OK", "branch": f"v{version}", "fppdAPI": "v1",
@@ -579,10 +580,24 @@ class LifecycleTests(unittest.TestCase):
         })
         bin_dir = os.path.join(self.base, "bin")
         os.makedirs(bin_dir, exist_ok=True)
+        with open(os.path.join(bin_dir, "version.json"), "w", encoding="utf-8") as handle:
+            handle.write(answer)
+        with open(os.path.join(bin_dir, "commands.json"), "w", encoding="utf-8") as handle:
+            handle.write(commands)
         path = os.path.join(bin_dir, "curl")
         with open(path, "w", encoding="utf-8") as handle:
-            handle.write(f"#!/bin/bash\necho '{answer}'\n")
+            handle.write(
+                "#!/bin/bash\n"
+                f'case "$*" in *api/commands*) cat "{bin_dir}/commands.json" ;; *) cat "{bin_dir}/version.json" ;; esac\n'
+            )
         os.chmod(path, 0o755)
+
+    def registered_commands(self):
+        """What FPP 9.5.3 answered to /api/commands: each command without its script, and other plugins' too."""
+        with open(os.path.join(ROOT, "commands", "descriptions.json"), encoding="utf-8") as handle:
+            ours = json.load(handle)
+        return [{"name": "Volume Set", "args": []}] + [
+            {"name": c["name"], "args": [dict(sorted(a.items())) for a in c.get("args", [])]} for c in ours]
 
     def run_hook(self, name, *args, **env):
         return subprocess.run(
@@ -655,6 +670,30 @@ class LifecycleTests(unittest.TestCase):
         self.run_hook("scripts/fpp_install.sh")
         with open(self.flag_file, encoding="utf-8") as handle:
             self.assertIn("restartFlag=1", handle.read())
+
+    def test_an_update_on_fpp_9_with_the_same_commands_needs_no_restart(self):
+        self.set_fpp_version("9.5", commands=json.dumps(self.registered_commands()))
+        result = self.run_hook("scripts/fpp_install.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse(os.path.exists(self.flag_file))
+
+    def test_a_restart_is_asked_for_on_fpp_9_when_a_command_is_missing(self):
+        self.set_fpp_version("9.5", commands=json.dumps(self.registered_commands()[:-1]))
+        self.run_hook("scripts/fpp_install.sh")
+        self.assertTrue(os.path.exists(self.flag_file))
+
+    def test_a_restart_is_asked_for_on_fpp_9_when_a_command_changed(self):
+        registered = self.registered_commands()
+        changed = next(c for c in registered if c["args"])
+        changed["args"][0]["max"] = 60
+        self.set_fpp_version("9.5", commands=json.dumps(registered))
+        self.run_hook("scripts/fpp_install.sh")
+        self.assertTrue(os.path.exists(self.flag_file))
+
+    def test_a_restart_is_asked_for_on_fpp_9_if_the_commands_cannot_be_read(self):
+        self.set_fpp_version("9.5", commands="<html>not found</html>")
+        self.assertEqual(self.run_hook("scripts/fpp_install.sh").returncode, 0)
+        self.assertTrue(os.path.exists(self.flag_file))
 
     def test_a_restart_is_asked_for_if_the_version_cannot_be_read(self):
         self.set_fpp_version("10.3", answer="not json")

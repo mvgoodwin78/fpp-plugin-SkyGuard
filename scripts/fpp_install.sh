@@ -10,6 +10,7 @@ if ! command -v python3 >/dev/null 2>&1; then
     exit 1
 fi
 
+PLUGIN_DIR="$(dirname "$(dirname "$(readlink -f "$0")")")"
 DATA_DIR="${MEDIADIR}/plugindata/fpp-plugin-SkyGuard"
 PRIVATE_FILE="${DATA_DIR}/private.json"
 
@@ -25,14 +26,23 @@ chmod 600 "${PRIVATE_FILE}"
 chown -R fpp:fpp "${DATA_DIR}" 2>/dev/null || true
 
 # FPP 10 and later register commands live, through the callbacks script. Earlier versions
-# read them only when fppd starts, so they need a restart. If the version can't be read,
-# ask for the restart: an extra restart is harmless, and missing commands aren't.
+# read them only when fppd starts, so they need a restart, but only when fppd doesn't already
+# have them as described: an update with the same commands runs the new scripts without one.
+# If the version or the commands can't be read, ask for the restart: an extra restart is
+# harmless, and missing commands aren't.
 if ! VERSION_DOC="$(curl -s -m 2 http://localhost/api/fppd/version 2>/dev/null)"; then
     VERSION_DOC=""
 fi
 FPP_MAJOR="$(echo "${VERSION_DOC}" | grep -oE '"majorVersion": *"?[0-9]+' | grep -oE '[0-9]+$' | head -n 1 || true)"
-if [ -z "${FPP_MAJOR}" ] || [ "${FPP_MAJOR}" -lt 10 ]; then
+if [ -z "${FPP_MAJOR}" ]; then
     setSetting restartFlag 1
+elif [ "${FPP_MAJOR}" -lt 10 ]; then
+    if ! COMMANDS_DOC="$(curl -s -m 2 http://localhost/api/commands 2>/dev/null)"; then
+        COMMANDS_DOC=""
+    fi
+    if ! (cd "${PLUGIN_DIR}" && python3 -m skyguard.commands_check <<<"${COMMANDS_DOC}"); then
+        setSetting restartFlag 1
+    fi
 fi
 
 # Lets browsers load the map's background. Without it the pages show the radar plot instead,
@@ -46,7 +56,6 @@ fi
 # hooks, so it would otherwise keep running the old code until the next full stop or reboot.
 # Only if it's already running: a new install starts it through the lifecycle hook.
 if [ -f "${DATA_DIR}/supervisor.pid" ]; then
-    PLUGIN_DIR="$(dirname "$(dirname "$(readlink -f "$0")")")"
     export MEDIADIR LOGDIR
     (cd "${PLUGIN_DIR}" && python3 -m skyguard.supervisor stop) || true
     /bin/bash "${PLUGIN_DIR}/scripts/skyguard_start.sh" || true
