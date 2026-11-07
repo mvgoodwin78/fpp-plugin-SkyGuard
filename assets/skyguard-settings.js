@@ -197,18 +197,25 @@ function skyGuardSettingSaved(key) {
             saveCenter(lat === '' ? null : lat, lon === '' ? null : lon).catch(showError);
         });
 
-        var locate = byId('skyGuardUseLocation');
-        if (!window.isSecureContext || !navigator.geolocation) {
-            locate.disabled = true;
-            byId('skyGuardLocationNote').textContent =
-                'Browsers only share your location over HTTPS. Enter it by hand or look up an address.';
-        }
-        locate.addEventListener('click', function () {
-            navigator.geolocation.getCurrentPosition(function (position) {
-                saveCenter(position.coords.latitude, position.coords.longitude).catch(showError);
-            }, function () {
-                toast('Your browser did not share a location.', 'danger');
-            });
+        /* Browsers only share their own location over HTTPS, and FPP is plain http, so this
+           copies the location saved in FPP's settings instead. */
+        byId('skyGuardUseFppLocation').addEventListener('click', function () {
+            var note = byId('skyGuardLocationNote');
+            Promise.all([request('GET', 'api/settings/Latitude'), request('GET', 'api/settings/Longitude')]).then(function (pair) {
+                var lat = parseFloat(pair[0].value);
+                var lon = parseFloat(pair[1].value);
+                if (!isFinite(lat) || !isFinite(lon) || Math.abs(lat) > 90 || Math.abs(lon) > 180 || (lat === 0 && lon === 0)) {
+                    note.textContent = 'FPP has no location saved. Enter yours by hand or look up an address.';
+                    return;
+                }
+                if (String(pair[0].value) === String(pair[0].default) && String(pair[1].value) === String(pair[1].default)) {
+                    note.textContent = 'FPP still has its default location, Falcon, Colorado. Enter yours by hand or look up an address.';
+                    return;
+                }
+                return saveCenter(lat, lon).then(function () {
+                    note.textContent = 'Copied from FPP\u2019s settings. Check it on the map: FPP\u2019s own Lookup button goes by your internet connection, not your address, so it can be miles off.';
+                });
+            }).catch(showError);
         });
 
         byId('skyGuardLookup').addEventListener('click', function () {

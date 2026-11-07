@@ -1,4 +1,5 @@
 import unittest
+from dataclasses import replace
 
 from skyguard.feeds.base import GROUND, AircraftRecord
 from skyguard.geo import haversine_nm
@@ -37,6 +38,12 @@ def evaluate(records, floor=0.0, ceiling=10000.0, count_no_position=True, radius
 
 
 class DistanceRuleTests(unittest.TestCase):
+    def test_a_helicopter_is_judged_exactly_like_a_plane(self):
+        for position, alt in ((INSIDE, 3000), (OUTSIDE, 3000), (INSIDE, 10001), (None, 3000)):
+            base = plane(position=position, alt=alt)
+            helicopter = replace(base, category="A7")
+            self.assertEqual(len(evaluate([helicopter]).in_zone), len(evaluate([base]).in_zone), (position, alt))
+
     def test_inside_radius_within_band(self):
         self.assertEqual(len(evaluate([plane()]).in_zone), 1)
 

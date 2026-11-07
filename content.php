@@ -53,7 +53,7 @@ function skyGuardCheckbox($title, $setting, $default) {
         </div>
     </div>
 
-    <div id="skyGuardWarnings" class="alert alert-warning" role="alert" hidden></div>
+    <div id="skyGuardWarnings" class="alert alert-warning skyguard-alert" role="alert" hidden></div>
 
     <ul class="nav nav-pills mb-3 flex-wrap" role="tablist">
         <li class="nav-item"><a class="nav-link active" data-bs-toggle="tab" href="#skyGuardTabData" role="tab">Data Source</a></li>
@@ -128,7 +128,7 @@ function skyGuardCheckbox($title, $setting, $default) {
             </div>
             <div class="mt-2 d-flex flex-wrap gap-2">
                 <button type="button" class="btn btn-sm btn-primary" id="skyGuardCenterSave">Save center point</button>
-                <button type="button" class="btn btn-sm btn-secondary" id="skyGuardUseLocation">Use my location</button>
+                <button type="button" class="btn btn-sm btn-secondary" id="skyGuardUseFppLocation">Use FPP's location</button>
             </div>
             <div class="form-text" id="skyGuardLocationNote"></div>
             <?php skyGuardRowClose(); ?>
@@ -142,7 +142,7 @@ function skyGuardCheckbox($title, $setting, $default) {
             <div class="form-text" id="skyGuardLookupNote"></div>
             <?php skyGuardRowClose(); ?>
 
-            <div id="skyGuardLagNotice" class="alert alert-info" role="status" data-show-with="online">
+            <div id="skyGuardLagNotice" class="alert alert-info skyguard-alert" role="status" data-show-with="online">
                 Online flight data can lag behind real aircraft. Increase your radius by 3 miles to allow for it.
             </div>
 

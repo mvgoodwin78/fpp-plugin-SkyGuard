@@ -41,6 +41,7 @@ def _combine(a, b):
         alt_ft=best.alt_ft if best.alt_ft is not None else other.alt_ft,
         gs_kt=best.gs_kt if best.gs_kt is not None else other.gs_kt,
         track_deg=best.track_deg if best.track_deg is not None else other.track_deg,
+        category=best.category if best.category is not None else other.category,
     )
 
 

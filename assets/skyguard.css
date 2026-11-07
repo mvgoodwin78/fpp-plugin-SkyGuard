@@ -86,6 +86,12 @@
     stroke-width: 1;
 }
 
+/* Its parts overlap: the outline goes behind the fill, so it stays one solid shape. */
+.skyguard-helicopter-shape {
+    paint-order: stroke;
+    stroke-width: 1.5;
+}
+
 .skyguard-plane-zone .skyguard-plane-shape {
     fill: var(--bs-danger);
 }
@@ -163,4 +169,9 @@
 
 .skyguard-radar-center {
     fill: var(--bs-primary);
+}
+
+/* FPP 9.5's theme sets every alert's text to white, which can't be read on the pale warning and info colors. */
+.alert.skyguard-alert {
+    color: var(--bs-alert-color);
 }

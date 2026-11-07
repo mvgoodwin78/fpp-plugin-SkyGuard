@@ -124,6 +124,16 @@
         return aircraft.in_zone ? zoneClass : '';
     }
 
+    /* A7 is the ADS-B category for rotorcraft. An aircraft that doesn't report one gets the plane. */
+    function isHelicopter(aircraft) {
+        return aircraft.category === 'A7';
+    }
+
+    /* Seen from above, nose up: crossed rotor blades over the body and tail. */
+    var HELICOPTER_SHAPE = 'M-8.85 -9.15 L-7.15 -10.85 L8.85 5.15 L7.15 6.85 Z ' +
+        'M7.15 -10.85 L8.85 -9.15 L-7.15 6.85 L-8.85 5.15 Z ' +
+        'M0 -7 C2.5 -7 3.5 -4.5 3.5 -2 C3.5 0.5 2 2.5 1 3.5 V8.5 H4 V11 H-4 V8.5 H-1 V3.5 C-2 2.5 -3.5 0.5 -3.5 -2 C-3.5 -4.5 -2.5 -7 0 -7 Z';
+
     /* Labels on every aircraft hide each other, so only the ones that matter have one to start with. */
     function labelShown(aircraft, opened) {
         return aircraft.in_zone || opened[aircraft.hex] === true;
@@ -174,10 +184,11 @@
                 }
                 var track = typeof aircraft.track_deg === 'number' ? aircraft.track_deg : 0;
                 var cls = planeClass(aircraft, 'skyguard-radar-plane-zone', 'skyguard-radar-plane-ignored');
+                var helicopter = isHelicopter(aircraft);
                 plot.appendChild(svgElement('path', {
                     'class': ('skyguard-radar-plane ' + cls).trim(),
-                    d: 'M0 -4 L3 3 L0 1.5 L-3 3 Z',
-                    transform: 'translate(' + x + ' ' + y + ') rotate(' + track + ')'
+                    d: helicopter ? HELICOPTER_SHAPE : 'M0 -4 L3 3 L0 1.5 L-3 3 Z',
+                    transform: 'translate(' + x + ' ' + y + ') rotate(' + track + ')' + (helicopter ? ' scale(0.5)' : '')
                 }));
                 /* Larger than the shape, so a finger can hit it. */
                 var target = svgElement('circle', { 'class': 'skyguard-radar-target', cx: x, cy: y, r: 8 });
@@ -202,8 +213,8 @@
         var drawing = svgElement('svg', { viewBox: '-12 -12 24 24' });
         var track = typeof aircraft.track_deg === 'number' ? aircraft.track_deg : 0;
         drawing.appendChild(svgElement('path', {
-            'class': 'skyguard-plane-shape',
-            d: 'M0 -11 L2 -3 L10 3 L10 5 L2 2 L1.5 7 L4 9 L4 10.5 L0 9.5 L-4 10.5 L-4 9 L-1.5 7 L-2 2 L-10 5 L-10 3 L-2 -3 Z',
+            'class': 'skyguard-plane-shape' + (isHelicopter(aircraft) ? ' skyguard-helicopter-shape' : ''),
+            d: isHelicopter(aircraft) ? HELICOPTER_SHAPE : 'M0 -11 L2 -3 L10 3 L10 5 L2 2 L1.5 7 L4 9 L4 10.5 L0 9.5 L-4 10.5 L-4 9 L-1.5 7 L-2 2 L-10 5 L-10 3 L-2 -3 Z',
             transform: 'rotate(' + track + ')'
         }));
         wrap.appendChild(drawing);

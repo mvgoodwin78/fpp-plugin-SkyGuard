@@ -1314,6 +1314,7 @@ class StatusAcceptanceTests(unittest.TestCase):
         self.assertAlmostEqual(aircraft["distance"], 3.45, delta=0.1)
         self.assertFalse(aircraft["ground_ignored"])
         self.assertIsNone(aircraft["note"])
+        self.assertIn("category", aircraft)
 
     def test_aircraft_beyond_the_display_range_are_left_out(self):
         self.assertEqual([a["hex"] for a in self.r.status()["aircraft"]], ["a1"])

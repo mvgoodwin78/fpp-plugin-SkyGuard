@@ -125,7 +125,7 @@ Each source is an adapter returning a normalized aircraft list, so new receivers
 | Online, ADSBx-v2-compatible | Point/radius query to the chosen provider | Provider picked from a list; see Online providers. The radius is in nautical miles and the aircraft list is under `ac`, with `now` in milliseconds |
 | Online, keyed provider | Same, with a user API key | Optional; key stored in plugin config, never logged |
 
-Normalized aircraft record: `hex`, `callsign`, `lat`, `lon` (nullable), `alt_ft` (barometric, or `ground`, or null when not reported), `gs_kt`, `track_deg`, `seen_pos_s`, `source`.
+Normalized aircraft record: `hex`, `callsign`, `lat`, `lon` (nullable), `alt_ft` (barometric, or `ground`, or null when not reported), `gs_kt`, `track_deg`, `seen_pos_s`, `source`, `category` (the ADS-B emitter category such as `A7`, or null; it only chooses the map icon and never affects a blackout).
 
 Receiver format notes: readsb, dump1090-fa and dump978-fa share one schema (`now` in seconds, `aircraft[]`, `alt_baro` a number or `"ground"`, `~` prefix on non-ICAO hex). readsb drops `lat`/`lon` once they are over 60 s old and may provide `lastPosition` instead, which is used as the last known position. `rr_lat`/`rr_lon` are rough receiver-based estimates and are not used as positions. Entries with no `hex` cannot be tracked; they are skipped and counted in the log.
 
@@ -202,7 +202,7 @@ The zone is one circle: a center lat/lon plus a radius, filtered by an altitude 
 ### Center point
 
 - Stored as decimal degrees (`center_lat`, `center_lon`) in `plugindata/fpp-plugin-SkyGuard/private.json`.
-- Set by manual entry, by address geocoding (backend calls a geocoding service on request only, result shown for the user to confirm), or by the browser's location (UI side; may need HTTPS, fall back to manual).
+- Set by manual entry, by address geocoding (backend calls a geocoding service on request only, result shown for the user to confirm), or by copying the latitude and longitude saved in FPP's own settings (UI side). The browser's location isn't used: browsers only share it over HTTPS, and FPP serves plain http. FPP's default location (Falcon, Colorado) is refused, and the page warns that FPP's own Lookup goes by public IP address and can be miles off.
 
 ### Per-poll evaluation
 
@@ -555,7 +555,7 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 | Tab | Contents |
 | --- | --- |
 | Data Source | Source mode; receiver URL and optional 978 URL with a Test button (shows aircraft seen or the error); online provider dropdown, masked API key field, Test button |
-| Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); Use my location button (disabled with a note when the page isn't HTTPS); display-only map of the center point and radius circle (no draggable pin); online radius and receiver radius as required entries with no pre-filled value, shown according to the data sources in use, and their unit; the lag notice when online data is selected; altitude floor and ceiling; "Ignore aircraft on the ground" switch |
+| Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); Use FPP's location button (copies FPP's saved latitude and longitude and saves them); display-only map of the center point and radius circle (no draggable pin); online radius and receiver radius as required entries with no pre-filled value, shown according to the data sources in use, and their unit; the lag notice when online data is selected; altitude floor and ceiling; "Ignore aircraft on the ground" switch |
 | Fixtures | Table, one row per head: name, universe or start channel, dimmer ch, dimmer off, shutter ch, shutter off, enabled. Add, duplicate, delete. Per-row Test button blacks out that head only for 3 s |
 | Matrix Message | Enable switch; panel picker from the FPP overlay model list; message field with click-to-insert placeholder buttons; live preview with sample values; Test on panels and Stop buttons, with a live view of the first ticked panel's real pixels during the test, also shown when the page is opened during one; no-data message; color, font, size, speed |
 | Advanced (collapsed) | Poll interval, online idle interval, health interval, fail count, max data age, release delay, count-no-position toggle, ground speed limit, units |
@@ -568,7 +568,7 @@ Top to bottom on a phone:
 
 1. **State badge:** CLEAR, BLACKOUT or IDLE with its reason, in Bootstrap semantic colors.
 2. **Controls:** Enable/Disable button (confirmation before disabling), Test Trigger button (off while disabled) and the aircraft list button.
-3. **Map:** center point, a circle for each radius that applies to the data sources chosen (online red, receiver blue; the one in use is solid and lightly filled, the other dashed, with a legend), aircraft icons rotated to heading; in-zone aircraft highlighted and labeled with callsign, altitude and speed, and any other aircraft shows its label when tapped or clicked, which lasts through each refresh, because labels on every aircraft hide each other; skipped ones marked `ground (ignored)`. Refreshes every 5 s from the status endpoint. When the newest data is older than twice the online interval outside a show plus 10 s, no aircraft are drawn or listed and a note says why: online data stops while disabled, and the status still holds the last aircraft seen.
+3. **Map:** center point, a circle for each radius that applies to the data sources chosen (online red, receiver blue; the one in use is solid and lightly filled, the other dashed, with a legend), aircraft icons rotated to heading, with a helicopter shape for category `A7` and a plane for everything else; in-zone aircraft highlighted and labeled with callsign, altitude and speed, and any other aircraft shows its label when tapped or clicked, which lasts through each refresh, because labels on every aircraft hide each other; skipped ones marked `ground (ignored)`. Refreshes every 5 s from the status endpoint. When the newest data is older than twice the online interval outside a show plus 10 s, no aircraft are drawn or listed and a note says why: online data stops while disabled, and the status still holds the last aircraft seen.
 4. **No-internet fallback:** if map tiles don't load, a theme-aware radar plot (range rings, radius circle, aircraft dots) drawn from the same data.
 5. **Aircraft list:** a full-screen list (callsign, altitude, speed, distance, in zone, or `ground (ignored)`) with a Back button, which the browser's own back also closes; same 5 s refresh.
 6. **Health:** active feed, receiver health, data age, aircraft count, whether a show is running, per-fixture status (including "Held dark" from `held_channels`). Current warnings sit under the state badge.

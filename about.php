@@ -64,6 +64,8 @@
             <dt>The status page says NOT RUNNING</dt>
             <dd>SkyGuard's program has stopped, so the heads aren't protected. Restart FPPD. If it still says this, reboot. If it stops again, check the log.</dd>
 
+            <dt>A helicopter shows as a plane on the map</dt>
+            <dd>An aircraft shows as a helicopter only when it reports itself as one, and some don't. The shape is only for the map: helicopters and planes are treated the same for a blackout.</dd>
             <dt>The plane icon at the top of FPP looks out of date</dt>
             <dd>Hover over it to see whether SkyGuard is on or off, and what it's doing. FPP refreshes this icon on its own schedule, so it can take about 30 seconds to catch up after a change. The status page is always current. Green means on and all is well, yellow means off or a warning, and red means blacked out or not running.</dd>
 

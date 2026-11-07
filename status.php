@@ -7,7 +7,7 @@
         <span id="skyGuardReason"></span>
     </div>
 
-    <div id="skyGuardStatusWarnings" class="alert alert-warning" role="alert" hidden></div>
+    <div id="skyGuardStatusWarnings" class="alert alert-warning skyguard-alert" role="alert" hidden></div>
 
     <div class="d-flex flex-wrap gap-2 mb-3">
         <button type="button" class="btn btn-primary" id="skyGuardToggle" disabled>…</button>

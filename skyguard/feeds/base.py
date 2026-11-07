@@ -6,9 +6,13 @@ fails dark. One bad aircraft entry never discards the others.
 """
 
 import math
+import re
 from dataclasses import dataclass
 
 GROUND = "ground"
+
+# ADS-B emitter category, such as A1 or A7 (rotorcraft).
+_CATEGORY = re.compile(r"[A-D][0-9]")
 
 # Above this, a timestamp can only be milliseconds: as seconds it would be past the year 5000.
 _MS_TIMESTAMP_THRESHOLD = 1e11
@@ -29,6 +33,7 @@ class AircraftRecord:
     track_deg: float | None
     seen_pos_s: float | None
     source: str
+    category: str | None = None  # only chooses the map icon, never a blackout
 
     @property
     def has_position(self):
@@ -68,6 +73,13 @@ def _altitude(value):
     return number(value)
 
 
+def _category(value):
+    if not isinstance(value, str):
+        return None
+    value = value.strip().upper()
+    return value if _CATEGORY.fullmatch(value) else None
+
+
 def parse_entry(entry, source):
     """Normalize one aircraft entry. Returns None if it has no usable hex."""
     if not isinstance(entry, dict):
@@ -88,6 +100,7 @@ def parse_entry(entry, source):
         track_deg=number(entry.get("track")),
         seen_pos_s=seen_pos,
         source=source,
+        category=_category(entry.get("category")),
     )
 
 

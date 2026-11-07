@@ -169,6 +169,23 @@ class BadEntryTests(unittest.TestCase):
         self.assertTrue(record.has_position)
         self.assertEqual(record.alt_ft, 0)
 
+    def test_category_is_kept_for_the_map(self):
+        self.assertEqual(self.parse_one(category="A7").category, "A7")
+        self.assertEqual(self.parse_one(category=" a7 ").category, "A7")
+
+    def test_a_missing_or_unusable_category_is_none(self):
+        self.assertIsNone(self.parse_one().category)
+        for value in ("", "helicopter", "A77", "<b>", 7, None, ["A7"]):
+            self.assertIsNone(self.parse_one(category=value).category, value)
+
+    def test_merging_receivers_fills_in_a_missing_category(self):
+        with_position = {"hex": "abc123", "lat": 40.0, "lon": -75.0, "seen_pos": 0.1}
+        first = parse_receiver({"now": 1793900000, "aircraft": [with_position]})
+        second = parse_receiver({"now": 1793900000, "aircraft": [{"hex": "abc123", "category": "A7"}]})
+        merged = by_hex(merge_snapshots(first, second))["abc123"]
+        self.assertEqual(merged.category, "A7")
+        self.assertEqual(merged.lat, 40.0)
+
     def test_blank_callsign_is_none(self):
         self.assertIsNone(self.parse_one(flight="        ").callsign)
 

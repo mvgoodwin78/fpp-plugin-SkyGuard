@@ -40,6 +40,7 @@ def _aircraft_entry(evaluated, settings, feed):
         "track_deg": record.track_deg,
         "seen_pos_s": record.seen_pos_s,
         "source": record.source,
+        "category": record.category,
         "distance": distance,
         "in_zone": evaluated.in_zone,
         "ground_ignored": evaluated.ground_ignored,
