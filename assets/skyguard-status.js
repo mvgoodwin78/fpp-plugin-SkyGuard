@@ -91,6 +91,7 @@
 
     var units = 'imperial';
     var staleAfterS = 70;
+    var betweenShows = false;
     var map = null;
     var last = null;
 
@@ -220,23 +221,36 @@
         });
     }
 
-    /* Online data stops while SkyGuard is disabled, and the last aircraft stay in the status.
-       Drawing them would show aircraft that left long ago, so old data means none are shown. */
+    var PAUSED_BETWEEN_SHOWS = 'No aircraft are shown, because SkyGuard only asks for online data during a show. ' +
+        'They appear here once a show starts, or turn on "Check online data between shows" under Advanced in SkyGuard Settings.';
+
+    /* Online data stops while SkyGuard is disabled, and between shows unless the user turned that on,
+       and the last aircraft stay in the status. Drawing them would show aircraft that left long ago,
+       so old data means none are shown. */
     function withoutOldAircraft(status) {
         var age = status.last_data_age_s;
         var old = typeof age === 'number' && age > staleAfterS;
         var note = byId('skyGuardOldData');
         var waiting = typeof age !== 'number' && status.running !== false && !!status.state;
+        var paused = status.enabled && status.active_feed === 'online' && status.in_schedule === false && !betweenShows;
         note.hidden = !(old || waiting);
         if (waiting) {
-            note.textContent = status.enabled ? 'No aircraft data has arrived yet.' :
-                'No aircraft are shown, because SkyGuard does not request online data while it is disabled. Enable it to see them here.';
+            if (paused) {
+                note.textContent = PAUSED_BETWEEN_SHOWS;
+            } else {
+                note.textContent = status.enabled ? 'No aircraft data has arrived yet.' :
+                    'No aircraft are shown, because SkyGuard does not request online data while it is disabled. Enable it to see them here.';
+            }
         }
         if (!old) {
             return status;
         }
-        note.textContent = 'No aircraft are shown, because the newest data is ' + Math.round(age / 60) +
-            ' minutes old.' + (status.enabled ? '' : ' SkyGuard does not request online data while it is disabled.');
+        if (paused) {
+            note.textContent = PAUSED_BETWEEN_SHOWS;
+        } else {
+            note.textContent = 'No aircraft are shown, because the newest data is ' + Math.round(age / 60) +
+                ' minutes old.' + (status.enabled ? '' : ' SkyGuard does not request online data while it is disabled.');
+        }
         return Object.assign({}, status, { aircraft: [], aircraft_in_zone: 0 });
     }
 
@@ -319,8 +333,10 @@
         }
         setupControls();
         setupList();
-        Promise.all([readSetting('units'), readSetting('map_tile_url'), readSetting('online_provider'), readSetting('online_idle_interval_s')]).then(function (results) {
+        Promise.all([readSetting('units'), readSetting('map_tile_url'), readSetting('online_provider'), readSetting('online_idle_interval_s'),
+            readSetting('online_between_shows')]).then(function (results) {
             units = results[0] === 'metric' ? 'metric' : 'imperial';
+            betweenShows = results[4] === '1';
             /* Two missed polls at the slowest rate in use, outside a show. */
             staleAfterS = 2 * (parseFloat(results[3]) || 30) + 10;
             map = SkyGuardMap.create({

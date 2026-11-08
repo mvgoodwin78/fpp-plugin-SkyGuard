@@ -141,6 +141,9 @@ class Rig:
         for _ in range(steps):
             self.time += seconds
             self.wall += seconds
+            # As on the threads: FPP's status is read every second, so the feeds know of a show.
+            self.daemon.fpp_watch.poll_once()
+            self.daemon.feed.set_in_schedule(self.daemon.fpp_watch.in_show(self.time))
             self.daemon.feed.poll_once()
             self.daemon.feed.health_once()
             self.daemon.feed.poll_second_once()

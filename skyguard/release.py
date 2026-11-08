@@ -16,11 +16,13 @@ from .overlay import Ledger, OverlayController
 
 
 def release_everything(paths, api, clock=time.monotonic):
-    """Returns True if every channel was released. Safe to run when nothing is held."""
+    """Returns True if every channel was released. Safe to run when nothing is held.
+    An unreadable ledger can't say what was held, so that counts as a failure."""
     ledger = Ledger(paths.ledger_file)
+    unknown = ledger.corrupt
     released = OverlayController(api, ledger, Notifier(), clock).release_all()
     MatrixController(api, ledger, clock).clear_all()
-    return released and not ledger.matrix
+    return released and not ledger.matrix and not unknown
 
 
 def main(argv=None):

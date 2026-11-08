@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import tempfile
+import threading
 from dataclasses import dataclass
 
 from .fpp_api import FppError
@@ -44,10 +45,16 @@ def atomic_write_json(path, doc):
 
 
 class Ledger:
-    """What the plugin holds in fppd: channels with their values, and matrix models it changed."""
+    """What the plugin holds in fppd: channels with their values, and matrix models it changed.
+
+    The main loop and the matrix thread both change it, so every change and save happens
+    under one lock. Otherwise one thread's older copy could be written last and leave out
+    channels that are held, which a restarted daemon would then never release.
+    """
 
     def __init__(self, path):
         self._path = path
+        self._lock = threading.RLock()
         self.channels = {}
         self.matrix = {}
         self.corrupt = False
@@ -72,18 +79,54 @@ class Ledger:
         """Whether a previous run may have left channels held."""
         return bool(self.channels) or self.corrupt
 
+    def channels_copy(self):
+        with self._lock:
+            return dict(self.channels)
+
+    def matrix_models(self):
+        with self._lock:
+            return list(self.matrix)
+
+    def hold_channels(self, channels):
+        """Record channels before their ranges are set. Saves only if something changed."""
+        with self._lock:
+            if all(self.channels.get(c) == v for c, v in channels.items()):
+                return True
+            self.channels.update(channels)
+            return self.save()
+
+    def forget_channels(self, channels):
+        """Forget channels whose ranges were deleted."""
+        with self._lock:
+            for channel in channels:
+                self.channels.pop(channel, None)
+            return self.save()
+
+    def remember_matrix(self, model, prior_state):
+        with self._lock:
+            if model in self.matrix:
+                return True
+            self.matrix[model] = prior_state
+            return self.save()
+
+    def forget_matrix(self, model):
+        with self._lock:
+            self.matrix.pop(model, None)
+            return self.save()
+
     def save(self):
-        doc = {
-            "channels": {str(k): v for k, v in self.channels.items()},
-            "matrix": self.matrix,
-        }
-        try:
-            atomic_write_json(self._path, doc)
-            self.corrupt = False
-            return True
-        except OSError:
-            _logger.exception("Could not write the active-range ledger")
-            return False
+        with self._lock:
+            doc = {
+                "channels": {str(k): v for k, v in self.channels.items()},
+                "matrix": dict(self.matrix),
+            }
+            try:
+                atomic_write_json(self._path, doc)
+                self.corrupt = False
+                return True
+            except OSError:
+                _logger.exception("Could not write the active-range ledger")
+                return False
 
 
 class OverlayController:
@@ -99,14 +142,18 @@ class OverlayController:
 
     @property
     def held(self):
-        return dict(self._ledger.channels)
+        return self._ledger.channels_copy()
+
+    def force_resend(self):
+        """Send every held range again on the next sync, as after fppd restarted and lost them."""
+        self._last_sent = None
+        self._sent_target = None
 
     def adopt_after_corrupt_ledger(self, channels):
         """With no usable record, assume the given {channel: value} are held so they get released."""
         if not self._ledger.corrupt:
             return
-        self._ledger.channels.update(channels)
-        self._ledger.save()
+        self._ledger.hold_channels(channels)
         _logger.warning(
             "Releasing every current fixture channel because the ledger was unreadable. "
             "A range from a fixture removed earlier could stay until fppd restarts."
@@ -132,9 +179,7 @@ class OverlayController:
         if not changed and not due:
             return True
 
-        if any(self._ledger.channels.get(c) != v for c, v in target.items()):
-            self._ledger.channels.update(target)
-            self._ledger.save()  # a failed save mustn't stop the blackout itself
+        self._ledger.hold_channels(target)  # a failed save mustn't stop the blackout itself
 
         self._last_sent = now
         ok = self._send_values(target)
@@ -155,13 +200,14 @@ class OverlayController:
         return ok
 
     def _release_others(self, target):
-        extra = {c: v for c, v in self._ledger.channels.items() if c not in target}
+        extra = {c: v for c, v in self._ledger.channels_copy().items() if c not in target}
         if not extra:
             return True
         ok = True
         by_value = {}
         for channel, value in extra.items():
             by_value.setdefault(value, []).append(channel)
+        released = []
         for value, channels in by_value.items():
             try:
                 self._api.set_ranges(channels, value)
@@ -170,9 +216,8 @@ class OverlayController:
                 _logger.warning("Could not release channel ranges: %s", error)
                 ok = False
                 continue
-            for channel in channels:
-                del self._ledger.channels[channel]
-        self._ledger.save()
+            released.extend(channels)
+        self._ledger.forget_channels(released)
         return ok
 
 
@@ -275,52 +320,75 @@ def blackout_target(resolved):
 
 
 class ChannelResolver:
-    """Keeps fixtures resolved as FPP's outputs change, and reports fixtures that can't resolve."""
+    """Keeps fixtures resolved as FPP's outputs change, and reports fixtures that can't resolve.
+
+    read_outputs() asks FPP and can block, so the daemon runs it on the FPP watch thread.
+    resolve() never blocks. refresh() does both, for callers with no thread of their own.
+    """
 
     def __init__(self, api, notifier, clock):
         self._api = api
         self._notifier = notifier
         self._clock = clock
+        self._lock = threading.Lock()
         self._doc = None
         self._have_doc = False
+        self._doc_version = 0
         self._last_read = None
         self._read_error_logged = False
         self._fixtures = None
+        self._resolved_version = None
         self._invalid = set()
         self.resolved = ()
 
     @property
     def ready(self):
         """Whether FPP's output configuration has been read at least once."""
-        return self._have_doc
+        with self._lock:
+            return self._have_doc
 
-    def refresh(self, fixtures):
-        """Re-resolve if the fixtures changed or the output configuration is due a re-read."""
-        now = self._clock()
-        due = self._last_read is None or now - self._last_read >= RESOLVE_INTERVAL_S
-        doc_changed = False
-        if due:
+    def read_outputs(self, force=False):
+        """Read FPP's output configuration if it is due, or now if forced. Returns True if read."""
+        with self._lock:
+            now = self._clock()
+            due = force or self._last_read is None or now - self._last_read >= RESOLVE_INTERVAL_S
+            if not due:
+                return False
             self._last_read = now
-            try:
-                doc = self._api.get_universe_outputs()
-                doc_changed = doc != self._doc or not self._have_doc
-                self._doc = doc
-                self._have_doc = True
-                self._read_error_logged = False
-            except FppError as error:
+        try:
+            doc = self._api.get_universe_outputs()
+        except FppError as error:
+            with self._lock:
                 # Keep resolving from the last good copy; channels don't move while FPP is away.
                 if not self._have_doc:
-                    self._last_read = None  # nothing to fall back on, so try again next loop
+                    self._last_read = None  # nothing to fall back on, so try again next time
                 if not self._read_error_logged:
                     _logger.warning("Could not read FPP's channel outputs: %s", error)
                     self._read_error_logged = True
+            return False
+        with self._lock:
+            if doc != self._doc or not self._have_doc:
+                self._doc = doc
+                self._doc_version += 1
+            self._have_doc = True
+            self._read_error_logged = False
+        return True
 
-        if not doc_changed and fixtures == self._fixtures:
+    def resolve(self, fixtures):
+        """Re-resolve if the fixtures or the last output configuration read changed."""
+        with self._lock:
+            doc, version = self._doc, self._doc_version
+        if version == self._resolved_version and fixtures == self._fixtures:
             return self.resolved
         self._fixtures = fixtures
-        self.resolved = resolve_fixtures(fixtures, self._doc)
+        self._resolved_version = version
+        self.resolved = resolve_fixtures(fixtures, doc)
         self._report_problems()
         return self.resolved
+
+    def refresh(self, fixtures):
+        self.read_outputs()
+        return self.resolve(fixtures)
 
     def _report_problems(self):
         invalid = {

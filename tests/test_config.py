@@ -41,7 +41,8 @@ class SettingsDefaultsTests(unittest.TestCase):
     def test_spec_defaults(self):
         s = load_settings({})
         self.assertTrue(s.enabled)
-        self.assertEqual(s.source_mode, "both")
+        self.assertEqual(s.source_mode, "receiver")  # the local option; nothing is sent until online is chosen
+        self.assertFalse(s.online_between_shows)
         self.assertEqual(s.online_provider, "adsb.fi")
         self.assertEqual(s.poll_interval_s, 1.0)
         self.assertEqual(s.online_idle_interval_s, 30.0)

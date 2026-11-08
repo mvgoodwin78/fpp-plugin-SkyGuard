@@ -21,13 +21,13 @@
 			{
 				"to": "api.adsb.lol",
 				"what": "your show's location and search radius",
-				"why": "to find nearby aircraft, when this is the online provider in use",
+				"why": "to find nearby aircraft during a show (between shows only if you turn that on)",
 				"alwaysOn": false
 			},
 			{
 				"to": "opendata.adsb.fi",
 				"what": "your show's location and search radius",
-				"why": "to find nearby aircraft, when this is the online provider in use",
+				"why": "to find nearby aircraft during a show (between shows only if you turn that on)",
 				"alwaysOn": false
 			},
 			{

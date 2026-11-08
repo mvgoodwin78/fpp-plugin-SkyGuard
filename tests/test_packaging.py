@@ -426,9 +426,20 @@ class PhpTests(unittest.TestCase):
         self.assertIn("skyGuardNumber('radius', 0.01, 99999)", page)
         self.assertIn("skyGuardNumber('radius_receiver', 0.01, 99999)", page)
 
-    def test_rows_without_an_id_get_one(self):
+    def test_the_fixture_list_get_writes_nothing(self):
         body = self.api.split("function fppPluginSkyGuardFixtureList(")[1].split("\nfunction ")[0]
-        self.assertIn("random_bytes", body)
+        self.assertNotIn("UpdateJson", body)
+        self.assertNotIn("WriteJson", body)
+
+    def test_address_lookup_is_a_json_post(self):
+        self.assertIn("array('method' => 'POST', 'endpoint' => 'geocode'", self.api)
+        body = self.api.split("function fppPluginSkyGuardGeocode(")[1].split("\nfunction ")[0]
+        self.assertIn("fppPluginSkyGuardJsonBody()", body)
+        self.assertNotIn("$_GET", body)
+        self.assertIn("request('POST', API + 'geocode', { q: query })", read("assets/skyguard-settings.js"))
+
+    def test_install_gives_old_fixture_rows_ids(self):
+        self.assertIn("python3 -m skyguard.migrate", read("scripts/fpp_install.sh"))
 
     def test_the_limits_shown_match_the_daemon(self):
         page = read("content.php")
@@ -525,6 +536,13 @@ class ReleaseTests(unittest.TestCase):
     def test_reports_failure_if_fpp_is_away(self):
         self.hold()
         self.fpp.available = False
+        with self.assertLogs("skyguard", level="WARNING"):
+            self.assertFalse(release_everything(self.paths, self.api))
+
+    def test_an_unreadable_ledger_counts_as_a_failure(self):
+        # It can't say what was held, so uninstall must ask for the restart that clears it.
+        with open(self.paths.ledger_file, "w", encoding="utf-8") as handle:
+            handle.write("{not json")
         with self.assertLogs("skyguard", level="WARNING"):
             self.assertFalse(release_everything(self.paths, self.api))
 
@@ -817,6 +835,76 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(self.wait_for(self.supervisor_running))
         self.assertTrue(self.wait_for(lambda: os.path.exists(self.paths.log_file)))
         self.assertEqual(os.listdir(os.path.join(self.media, "logs")), [f"plugin-{REPO}.log"])
+
+    def fake_content_policy(self, already=False):
+        """A stand-in for FPP's ManageApacheContentPolicy.sh that records its calls."""
+        self.policy_log = os.path.join(self.base, "policy.log")
+        answer = "Domain 'x' already exists under 'img-src' or key doesn't exist." if already else "Domain 'x' added under 'img-src'."
+        path = os.path.join(self.fppdir, "scripts", "ManageApacheContentPolicy.sh")
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(f'#!/bin/bash\necho "$1 $2 $3" >> "{self.policy_log}"\necho "{answer}"\n')
+        os.chmod(path, 0o755)
+
+    def policy_calls(self):
+        if not os.path.exists(self.policy_log):
+            return []
+        with open(self.policy_log, encoding="utf-8") as handle:
+            return [line.split()[0] for line in handle.read().splitlines()]
+
+    def test_uninstall_removes_the_map_entry_skyguard_added(self):
+        self.fake_content_policy()
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/fpp_uninstall.sh")
+        self.assertEqual(self.policy_calls(), ["add", "remove"])
+
+    def test_uninstall_leaves_a_map_entry_that_was_already_there(self):
+        self.fake_content_policy(already=True)
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/fpp_uninstall.sh")
+        self.assertEqual(self.policy_calls(), ["add"])
+
+    def test_an_update_keeps_the_record_that_skyguard_added_it(self):
+        self.fake_content_policy()
+        self.run_hook("scripts/fpp_install.sh")
+        self.fake_content_policy(already=True)  # the entry is there now, from the first install
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/fpp_uninstall.sh")
+        self.assertEqual(self.policy_calls(), ["add", "add", "remove"])
+
+    def test_an_install_from_before_the_record_counts_as_having_added_it(self):
+        os.makedirs(self.paths.data_dir)
+        with open(self.paths.private_file, "w", encoding="utf-8") as handle:
+            handle.write("{}")
+        self.fake_content_policy(already=True)
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/fpp_uninstall.sh")
+        self.assertEqual(self.policy_calls(), ["add", "remove"])
+
+    def test_uninstall_asks_for_a_restart_if_channels_could_not_be_released(self):
+        self.run_hook("scripts/fpp_install.sh")
+        Ledger(self.paths.ledger_file).hold_channels({10: 0})  # and no FPP to release them in
+        result = self.run_hook("scripts/fpp_uninstall.sh")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        with open(self.flag_file, encoding="utf-8") as handle:
+            self.assertIn("restartFlag=1", handle.read())
+
+    def test_uninstall_on_fpp_10_with_nothing_held_asks_for_no_restart(self):
+        self.run_hook("scripts/fpp_install.sh")
+        self.run_hook("scripts/fpp_uninstall.sh")
+        self.assertFalse(os.path.exists(self.flag_file))
+
+    def test_install_needs_python_3_10(self):
+        self.assertIn("sys.version_info >= (3, 10)", read("scripts/fpp_install.sh"))
+
+    def test_install_gives_old_fixture_rows_an_id(self):
+        os.makedirs(self.paths.data_dir)
+        with open(self.paths.fixtures_file, "w", encoding="utf-8") as handle:
+            json.dump([{"name": "Old", "universe": 1, "dimmer_ch": 1}, {"name": "New", "id": "abc"}], handle)
+        self.assertEqual(self.run_hook("scripts/fpp_install.sh").returncode, 0)
+        with open(self.paths.fixtures_file, encoding="utf-8") as handle:
+            rows = json.load(handle)
+        self.assertTrue(rows[0]["id"])
+        self.assertEqual(rows[1]["id"], "abc")
 
     def test_uninstall_works_with_fppdir_unset(self):
         # uninstall_plugin passes FPPDIR only as an argument, and sudo strips the exported one,

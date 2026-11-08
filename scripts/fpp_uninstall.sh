@@ -14,9 +14,20 @@ if ! VERSION_DOC="$(curl -s -m 2 http://localhost/api/fppd/version 2>/dev/null)"
 fi
 FPP_MAJOR="$(echo "${VERSION_DOC}" | grep -oE '"majorVersion": *"?[0-9]+' | grep -oE '[0-9]+$' | head -n 1 || true)"
 
-# Stop first, then release, so nothing can set a range again afterwards.
+# Stop first, then release, so nothing can set a range again afterwards. If anything could
+# not be released, the heads would stay dark with no plugin left to explain why, so FPPD
+# is asked to restart, which clears every range.
 python3 -m skyguard.supervisor stop 2>/dev/null || true
-python3 -m skyguard.release 2>/dev/null || true
+if ! python3 -m skyguard.release 2>/dev/null; then
+    echo "SkyGuard could not release every channel it held. Restart FPPD to clear them."
+    setSetting restartFlag 1
+fi
+
+# Read before the data folder goes: only remove the map entry if SkyGuard added it.
+CSP_ADDED=0
+if [ -e "${MEDIADIR}/plugindata/fpp-plugin-SkyGuard/csp_added" ]; then
+    CSP_ADDED=1
+fi
 
 # Reinstall (FPP 10.4+) runs this with FPP_PLUGIN_REINSTALL=1 and keeps the user's setup.
 # Anything else, including an unset value, is a real uninstall.
@@ -25,7 +36,7 @@ if [ "${FPP_PLUGIN_REINSTALL:-0}" != "1" ]; then
     rm -f "${MEDIADIR}/config/plugin.fpp-plugin-SkyGuard"
 fi
 
-if [ -x "${FPPDIR}/scripts/ManageApacheContentPolicy.sh" ]; then
+if [ "${CSP_ADDED}" = "1" ] && [ -x "${FPPDIR}/scripts/ManageApacheContentPolicy.sh" ]; then
     "${FPPDIR}/scripts/ManageApacheContentPolicy.sh" remove img-src https://tile.openstreetmap.org 2>/dev/null || true
 fi
 

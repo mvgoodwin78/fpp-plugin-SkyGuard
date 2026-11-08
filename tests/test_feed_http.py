@@ -227,6 +227,7 @@ class LiveManagerTests(ServerTestCase):
             "online_idle_interval_s": 0.02,
             "health_interval_s": 0.05,
             "max_data_age_s": 0.3,
+            "online_between_shows": True,  # these run outside a show
         }
         values.update(overrides)
         self.warnings = WarningSink()

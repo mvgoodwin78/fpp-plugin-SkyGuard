@@ -171,7 +171,14 @@
     fill: var(--bs-primary);
 }
 
-/* FPP 9.5's theme sets every alert's text to white, which can't be read on the pale warning and info colors. */
-.alert.skyguard-alert {
+/* FPP 9.5's theme sets every alert's text to white, which can't be read on the pale warning color.
+   Only warnings: FPP gives info alerts a solid teal background, where white is right. */
+.alert-warning.skyguard-alert {
     color: var(--bs-alert-color);
+}
+
+/* The live view of the panel message: sharp pixels, no wider than it's useful. */
+.skyguard-live-canvas {
+    max-width: 40rem;
+    image-rendering: pixelated;
 }

@@ -55,6 +55,18 @@ class CommandsCheckTests(unittest.TestCase):
         doc[0]["args"].append({"name": "new"})
         self.assertFalse(commands_registered(OURS, doc))
 
+    def test_script_names_are_pinned(self):
+        # FPP 9.5 doesn't report script names in /api/commands, so the check can't see a rename,
+        # and fppd would keep calling the old file until it restarts. Renaming a script needs the
+        # install script to force a restart on FPP 9.5 first; only then update this list.
+        self.assertEqual({c["name"]: c["script"] for c in OURS}, {
+            "SkyGuard Enable": "skyguard_enable.py",
+            "SkyGuard Disable": "skyguard_disable.py",
+            "SkyGuard Test Trigger": "skyguard_test.py",
+            "SkyGuard Test Message": "skyguard_test_message.py",
+            "SkyGuard Stop Test Message": "skyguard_stop_test_message.py",
+        })
+
     def test_unreadable_answers_ask_for_the_restart(self):
         for text in ("", "not json", "{}", "null", "[1, 2]", "<html></html>"):
             self.assertEqual(main(io.StringIO(text)), 1, text)

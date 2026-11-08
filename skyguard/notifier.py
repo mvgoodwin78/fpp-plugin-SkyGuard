@@ -6,7 +6,9 @@ Warning events are de-duplicated here: one all_feeds_down per outage, not one pe
 import json
 import logging
 import re
+import sys
 import threading
+import time
 from dataclasses import dataclass, field
 
 LOGGER_NAME = "skyguard"
@@ -171,3 +173,44 @@ class WarningSink:
     def warnings(self):
         with self._lock:
             return list(self._warnings.values())
+
+
+class RepeatLimiter:
+    """Logs an error's traceback the first time, then only a count about once a minute while
+    the same error repeats. A loop failing on every tick would otherwise write tracebacks
+    several times a second, which can fill the media partition before logs rotate."""
+
+    def __init__(self, logger, interval_s=60.0, clock=time.monotonic):
+        self._logger = logger
+        self._interval_s = interval_s
+        self._clock = clock
+        self._lock = threading.Lock()
+        self._key = None
+        self._repeats = 0
+        self._since = None
+
+    def exception(self, message):
+        """Call from an except block."""
+        kind, error, _trace = sys.exc_info()
+        key = (message, kind, str(error))
+        now = self._clock()
+        with self._lock:
+            if key != self._key:
+                self._key, self._repeats, self._since = key, 0, now
+                first = True
+            else:
+                self._repeats += 1
+                first = False
+                due = now - self._since >= self._interval_s
+                repeats = self._repeats
+                if due:
+                    self._repeats, self._since = 0, now
+        if first:
+            self._logger.exception("%s", message)
+        elif due:
+            self._logger.error("%s (%s more times since the last report): %s", message, repeats, error)
+
+    def clear(self):
+        """The loop worked again, so the next error is logged in full."""
+        with self._lock:
+            self._key = None

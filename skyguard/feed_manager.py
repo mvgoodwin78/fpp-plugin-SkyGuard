@@ -21,7 +21,7 @@ from dataclasses import dataclass
 
 from .config import FEED_ONLINE, FEED_RECEIVER
 from .feeds.base import FeedError
-from .feeds.http_client import FeedHttpError, fetch_json
+from .feeds.http_client import DEFAULT_TIMEOUT_S, FeedHttpError, fetch_json
 from .feeds.online_adsbx_v2 import PROVIDERS, OnlineAdapter
 from .feeds.receiver import (
     SOURCE_RECEIVER,
@@ -29,7 +29,7 @@ from .feeds.receiver import (
     ReceiverAdapter,
     merge_snapshots,
 )
-from .notifier import LOGGER_NAME
+from .notifier import LOGGER_NAME, RepeatLimiter
 from .trigger import data_is_fresh
 
 FROZEN_GRACE_S = 3.0  # decoders write about once a second; beyond this, `now` is stuck
@@ -127,12 +127,15 @@ class FeedManager:
 
     @property
     def _online_allowed(self):
+        """Online requests carry the show's location, so they're only sent when needed: during
+        a show, or between shows if the user has turned that on."""
         settings = self._settings
         return (
             settings.enabled
             and settings.center_set
             and settings.radius is not None
             and settings.personal_use_confirmed
+            and (self._in_schedule or settings.online_between_shows)
         )
 
     def _choose_active(self):
@@ -186,9 +189,15 @@ class FeedManager:
     def set_in_schedule(self, in_schedule):
         """Tell the manager about the show window. A new window polls at once."""
         with self._lock:
-            if in_schedule and not self._in_schedule:
+            if in_schedule == self._in_schedule:
+                return
+            if in_schedule:
                 self._force_poll = True
             self._in_schedule = in_schedule
+            if not self._settings.online_between_shows:
+                self._generation += 1  # an online request in flight may no longer be wanted
+            self._refresh_active()
+            self._update_feeds_down(self._clock())
 
     def update_settings(self, settings):
         with self._lock:
@@ -214,7 +223,12 @@ class FeedManager:
                 self._reset_receiver_tracking()
                 self._notifier.emit("receiver_restored")
                 self._notifier.emit("receiver_978_restored")
-            if old.enabled != settings.enabled or old.center_set != settings.center_set or old.personal_use_confirmed != settings.personal_use_confirmed:
+            if (
+                old.enabled != settings.enabled
+                or old.center_set != settings.center_set
+                or old.personal_use_confirmed != settings.personal_use_confirmed
+                or old.online_between_shows != settings.online_between_shows
+            ):
                 self._generation += 1  # a request in flight may no longer be wanted
             if receiver_changed or query_changed:
                 self._generation += 1
@@ -529,6 +543,7 @@ class FeedManager:
                 self._last_success_at,
                 self._last_poll_failed,
                 self._max_data_age(),
+                poll_window_s=self._poll_interval() + DEFAULT_TIMEOUT_S,
             )
 
     def state(self):
@@ -554,13 +569,15 @@ class FeedManager:
     # Threads --------------------------------------------------------------------
 
     def _loop(self, step, tick_s):
+        errors = RepeatLimiter(_logger)
         while not self._stop.wait(tick_s):
             try:
                 step()
+                errors.clear()
             except Exception:
                 # A surprise here must not end polling: that would freeze the feed
                 # state silently. The data age then fails dark on its own.
-                _logger.exception("Feed loop error in %s", step.__name__)
+                errors.exception(f"Feed loop error in {step.__name__}")
 
     def start(self, tick_s=LOOP_TICK_S):
         self._stop.clear()

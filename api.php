@@ -6,7 +6,7 @@ function getEndpointsfpppluginSkyGuard() {
     return array(
         array('method' => 'GET', 'endpoint' => 'status', 'callback' => 'fppPluginSkyGuardStatus'),
         array('method' => 'GET', 'endpoint' => 'headerIndicator', 'callback' => 'fppPluginSkyGuardHeaderIndicator'),
-        array('method' => 'GET', 'endpoint' => 'geocode', 'callback' => 'fppPluginSkyGuardGeocode'),
+        array('method' => 'POST', 'endpoint' => 'geocode', 'callback' => 'fppPluginSkyGuardGeocode'),
         array('method' => 'GET', 'endpoint' => 'private', 'callback' => 'fppPluginSkyGuardPrivateGet'),
         array('method' => 'PUT', 'endpoint' => 'private', 'callback' => 'fppPluginSkyGuardPrivatePut'),
         array('method' => 'GET', 'endpoint' => 'fixtures', 'callback' => 'fppPluginSkyGuardFixtureList'),
@@ -65,7 +65,7 @@ function fppPluginSkyGuardWriteJson($path, $doc, $mode) {
 
 // Run $change($doc) on a JSON file while holding a lock. Returns true if it was saved.
 function fppPluginSkyGuardUpdateJson($path, $default, $mode, $change) {
-    $lock = fopen(fppPluginSkyGuardDataDir() . '/.write.lock', 'c');
+    $lock = @fopen(fppPluginSkyGuardDataDir() . '/.write.lock', 'c');
     if ($lock === false || !flock($lock, LOCK_EX)) {
         return false;
     }
@@ -264,31 +264,9 @@ function fppPluginSkyGuardFixturePath() {
 }
 
 // GET /api/plugin/fpp-plugin-SkyGuard/fixtures
-// Rows saved before rows had ids get one here, because the page edits rows by id.
+// Reads only. Rows from early versions get their ids at install (skyguard/migrate.py).
 function fppPluginSkyGuardFixtureList() {
     $rows = fppPluginSkyGuardReadJson(fppPluginSkyGuardFixturePath(), array());
-    $missing = false;
-    foreach ($rows as $row) {
-        if (is_array($row) && empty($row['id'])) {
-            $missing = true;
-        }
-    }
-    if ($missing) {
-        fppPluginSkyGuardUpdateJson(
-            fppPluginSkyGuardFixturePath(),
-            array(),
-            0644,
-            function ($current) {
-                foreach ($current as $index => $row) {
-                    if (is_array($row) && empty($row['id'])) {
-                        $current[$index]['id'] = bin2hex(random_bytes(8));
-                    }
-                }
-                return $current;
-            }
-        );
-        $rows = fppPluginSkyGuardReadJson(fppPluginSkyGuardFixturePath(), array());
-    }
     return json(array('fixtures' => array_values(array_filter($rows, 'is_array'))));
 }
 
@@ -481,14 +459,19 @@ function fppPluginSkyGuardTestOnline() {
     return json(array('status' => 'OK', 'aircraft' => count($result[0]['ac'])));
 }
 
-// GET /api/plugin/fpp-plugin-SkyGuard/geocode?q=<address>
+// POST /api/plugin/fpp-plugin-SkyGuard/geocode with {"q": "<address>"}
+// A POST with a JSON body, so another site can't make FPP send an address out.
 // Nominatim's usage policy allows at most 1 request a second and asks that repeated
 // queries be avoided, hence the throttle and the one-entry cache. The address isn't logged.
 function fppPluginSkyGuardGeocode() {
     if (ReadSettingFromFile('geocoder', 'fpp-plugin-SkyGuard') === 'off') {
         return fppPluginSkyGuardError(403, 'Address lookup is switched off.');
     }
-    $query = isset($_GET['q']) ? trim(strval($_GET['q'])) : '';
+    $body = fppPluginSkyGuardJsonBody();
+    if ($body === null) {
+        return fppPluginSkyGuardError(415, 'Send the address as JSON.');
+    }
+    $query = isset($body['q']) ? trim(strval($body['q'])) : '';
     if (strlen($query) < 3 || strlen($query) > 200) {
         return fppPluginSkyGuardError(400, 'Enter an address.');
     }

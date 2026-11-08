@@ -30,7 +30,7 @@
         <ul>
             <li><strong>It only happens during a show.</strong> A show means a playlist or sequence playing, including one you started by hand, or live E1.31, Art-Net or DDP data arriving at FPP, and for 30 seconds after it stops. That last one means an xLights test session can black out the heads too. Outside a show the state is IDLE and the heads aren't touched, apart from your own tests.</li>
             <li><strong>It starts on the first poll</strong> that finds an aircraft in the zone, and ends once the zone has been clear for the release delay.</li>
-            <li><strong>Altitude limits apply.</strong> An aircraft must be between your lowest and highest altitudes to count. If its altitude is unknown and it's inside the radius, it counts.</li>
+            <li><strong>Altitude limits apply.</strong> An aircraft must be between your lowest and highest altitudes to count. If its altitude is unknown and it's inside the radius, it counts. Aircraft report pressure altitude, which on a high-pressure day can read below 0 for one coming in low, so a lowest altitude of 0 means no lower limit.</li>
             <li><strong>Aircraft with no position</strong> count as in the zone if their altitude is in range, unless you turn that off under Advanced.</li>
             <li><strong>Ground traffic:</strong> with "Ignore aircraft on the ground" on, an aircraft reporting it's on the ground is skipped until it reaches the ground speed limit under Advanced, which is 40 knots by default. The map and list show these as <code>ground (ignored)</code>. A helicopter hovering low still counts unless it reports being on the ground.</li>
         </ul>
@@ -66,6 +66,7 @@
 
             <dt>A helicopter shows as a plane on the map</dt>
             <dd>An aircraft shows as a helicopter only when it reports itself as one, and some don't. The shape is only for the map: helicopters and planes are treated the same for a blackout.</dd>
+
             <dt>The plane icon at the top of FPP looks out of date</dt>
             <dd>Hover over it to see whether SkyGuard is on or off, and what it's doing. FPP refreshes this icon on its own schedule, so it can take about 30 seconds to catch up after a change. The status page is always current. Green means on and all is well, yellow means off or a warning, and red means blacked out or not running.</dd>
 
@@ -73,7 +74,7 @@
             <dd>The words beside the state say why. It may be that no show is running, SkyGuard is disabled, or the personal use confirmation, center point or a radius is missing.</dd>
 
             <dt>No aircraft on the map, but the online Test finds some</dt>
-            <dd>The Test makes its own request. The map uses SkyGuard's regular polling, and online data isn't requested while SkyGuard is disabled. Enable it. With no show running, positions then update about every 30 seconds.</dd>
+            <dd>The Test makes its own request. The map uses SkyGuard's regular polling, which asks for online data only during a show, and never while SkyGuard is disabled. To see aircraft between shows, turn on "Check online data between shows" under Advanced in SkyGuard Settings.</dd>
 
             <dt>The map shows a radar plot instead</dt>
             <dd>Map images couldn't load, usually because this device or your browser can't reach the internet. The plot uses the same data. An empty map address under Advanced also gives you the plot.</dd>
@@ -116,7 +117,7 @@
     <fieldset class="border rounded p-3 mt-3">
         <legend>What leaves this device</legend>
         <ul class="mb-0">
-            <li><strong>Online flight data:</strong> your show's location and search radius go to the provider you choose. Nothing goes while SkyGuard is disabled or before you confirm personal use.</li>
+            <li><strong>Online flight data:</strong> your show's location and search radius go to the provider you choose, during a show. Between shows nothing goes unless you turn on "Check online data between shows", and nothing goes while SkyGuard is disabled or before you confirm personal use.</li>
             <li><strong>Map:</strong> while a map is open, your browser loads images from OpenStreetMap, which shows it roughly where your show is. Clear the map address under Advanced to stop this.</li>
             <li><strong>Address lookup:</strong> a typed address goes to OpenStreetMap only when you press Look up.</li>
             <li><strong>Your receiver:</strong> requests go to the address you enter.</li>

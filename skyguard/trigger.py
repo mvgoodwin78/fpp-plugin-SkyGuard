@@ -51,8 +51,12 @@ class ZoneResult:
 
 
 def _altitude_passes(alt_ft, floor_ft, ceiling_ft):
+    """Feeds report pressure altitude. On a high-pressure day, or near a low airport, an
+    aircraft on approach can report below 0 ft, so a floor of 0 or less means no floor."""
     feet = 0.0 if alt_ft == GROUND else alt_ft
-    return floor_ft <= feet <= ceiling_ft
+    if floor_ft > 0 and feet < floor_ft:
+        return False
+    return feet <= ceiling_ft
 
 
 def _closest(in_zone):
@@ -154,12 +158,18 @@ def merge_zones(first, second):
     )
 
 
-def data_is_fresh(now, last_success_at, last_poll_failed, max_data_age_s):
-    """Whether feed data is usable. A max age of 0 means stale on the first failed poll."""
+def data_is_fresh(now, last_success_at, last_poll_failed, max_data_age_s, poll_window_s=None):
+    """Whether feed data is usable. A max age of 0 means stale on the first failed poll.
+
+    A poll that hangs never fails, though: a stuck name lookup isn't covered by the request
+    timeout. So with 0, data is also stale once `poll_window_s` (the poll interval plus
+    the request timeout) has passed with no success.
+    """
     if last_success_at is None:
         return False
     if max_data_age_s == 0:
-        return not last_poll_failed
+        hung = poll_window_s is not None and now - last_success_at > poll_window_s
+        return not last_poll_failed and not hung
     return now - last_success_at <= max_data_age_s
 
 

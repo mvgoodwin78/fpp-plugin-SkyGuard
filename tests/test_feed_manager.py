@@ -42,6 +42,9 @@ def settings(**overrides):
         "receiver_url": RX,
         "center_lat": 40.0,
         "center_lon": -75.0,
+        # These tests were written when online data was also polled between shows. That
+        # is now a setting, off by default: BetweenShowsTests covers the default.
+        "online_between_shows": True,
     }
     values.update(overrides)
     return Settings(**values)

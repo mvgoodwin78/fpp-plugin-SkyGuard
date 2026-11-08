@@ -66,9 +66,9 @@ function skyGuardCheckbox($title, $setting, $default) {
 
         <div class="tab-pane fade show active" id="skyGuardTabData" role="tabpanel">
             <?php skyGuardRowOpen('Aircraft data from'); ?>
-            <?php skyGuardSelect('Aircraft data from', 'source_mode', 'both', array(
-                'My receiver, with online data as a check and a backup' => 'both',
+            <?php skyGuardSelect('Aircraft data from', 'source_mode', 'receiver', array(
                 'My receiver only' => 'receiver',
+                'My receiver, with online data as a check and a backup' => 'both',
                 'Online data only (I have no receiver)' => 'online',
             )); ?>
             <?php skyGuardRowClose(); ?>
@@ -141,7 +141,7 @@ function skyGuardCheckbox($title, $setting, $default) {
             <div class="form-text" id="skyGuardLookupNote"></div>
             <?php skyGuardRowClose(); ?>
 
-            <div id="skyGuardLagNotice" class="alert alert-info skyguard-alert" role="status" data-show-with="online">
+            <div id="skyGuardLagNotice" class="alert alert-info" role="status" data-show-with="online">
                 Online flight data can lag behind real aircraft. Increase your radius by 3 miles to allow for it.
             </div>
 
@@ -214,7 +214,7 @@ function skyGuardCheckbox($title, $setting, $default) {
                 <div class="form-text">Shows the message on the panels ticked above, with the sample values, until you press Stop. The heads aren't affected.</div>
                 <div id="skyGuardLive" class="mt-2" hidden>
                     <div class="form-text" id="skyGuardLiveLabel"></div>
-                    <canvas id="skyGuardLiveCanvas" class="w-100 border" style="max-width: 640px; image-rendering: pixelated;"></canvas>
+                    <canvas id="skyGuardLiveCanvas" class="w-100 border skyguard-live-canvas"></canvas>
                 </div>
             </div>
             <?php skyGuardRowClose(); ?>
@@ -251,7 +251,10 @@ function skyGuardCheckbox($title, $setting, $default) {
             <?php skyGuardRowOpen('Poll interval', '', 'How often SkyGuard asks for aircraft positions, from 1 to 2 seconds. Shorter notices an aircraft sooner. Your receiver is always asked this often. Online data follows this only during a show, and never faster than the provider allows: every 2 seconds for adsb.fi, every 15 seconds for adsb.lol.'); ?>
             <?php skyGuardNumber('poll_interval_s', 1, 2, '1', 'seconds'); ?>
             <?php skyGuardRowClose(); ?>
-            <?php skyGuardRowOpen('Online interval outside a show', '', 'How often online data is asked when no show is running, from 5 to 300 seconds. Slower is kinder to the free services.'); ?>
+            <?php skyGuardRowOpen('Check online data between shows', '', 'Off: online data is only asked for during a show, so your location isn\'t sent all day. The map then shows online aircraft only during a show. On: it is also asked between shows, at the interval below.'); ?>
+            <?php skyGuardCheckbox('Check online data between shows', 'online_between_shows', 0); ?>
+            <?php skyGuardRowClose(); ?>
+            <?php skyGuardRowOpen('Online interval between shows', '', 'Used only when checking online data between shows is on. From 5 to 300 seconds; slower is kinder to the free services.'); ?>
             <?php skyGuardNumber('online_idle_interval_s', 5, 300, '30', 'seconds'); ?>
             <?php skyGuardRowClose(); ?>
             <?php skyGuardRowOpen('Receiver check interval'); ?>

@@ -9,7 +9,13 @@ rather than dropping protection for the heads it described.
 import json
 import math
 import os
+import time
 from dataclasses import dataclass, replace
+
+try:
+    import fcntl
+except ImportError:  # not Linux, as when the tests run elsewhere
+    fcntl = None
 from urllib.parse import urlsplit
 
 from . import REPO_NAME
@@ -27,6 +33,8 @@ MATRIX_POSITIONS = ("Center", "Right to Left", "Left to Right", "Bottom to Top",
 _TRUE_WORDS = ("1", "true", "yes", "on")
 _FALSE_WORDS = ("0", "false", "no", "off")
 _QUOTE_AND_SPACE = " \t\n\r\0\x0b\""
+# A read that looks caught mid-write is believed only once it has stayed the same this long.
+SUSPECT_READ_ACCEPT_S = 1.0
 
 
 @dataclass(frozen=True)
@@ -67,7 +75,7 @@ class Paths:
 @dataclass(frozen=True)
 class Settings:
     enabled: bool = True
-    source_mode: str = "both"
+    source_mode: str = "receiver"  # the local option, so nothing is sent until online is chosen
     receiver_url: str = ""
     receiver_978_url: str = ""
     online_provider: str = DEFAULT_PROVIDER
@@ -75,6 +83,7 @@ class Settings:
     personal_use_confirmed: bool = False  # the plugin does nothing until this is confirmed
     poll_interval_s: float = 1.0
     online_idle_interval_s: float = 30.0
+    online_between_shows: bool = False  # off: online data is only asked for during a show
     health_interval_s: float = 10.0
     health_fail_count: int = 2
     max_data_age_s: float = 5.0
@@ -299,6 +308,7 @@ def load_settings(raw, private=None):
         personal_use_confirmed=read.boolean("personal_use_confirmed"),
         poll_interval_s=read.number("poll_interval_s", 1, 2),
         online_idle_interval_s=read.number("online_idle_interval_s", 5, 300),
+        online_between_shows=read.boolean("online_between_shows"),
         health_interval_s=read.number("health_interval_s", 1),
         health_fail_count=read.number("health_fail_count", 1, parse=_parse_int),
         max_data_age_s=read.number("max_data_age_s", 0),
@@ -430,11 +440,27 @@ def _read_json(path, default):
         return default
 
 
+def _read_shared(path):
+    """The file's text, or None if a writer holds it. FPP's WriteSettingToFile empties the
+    file and rewrites it in place while holding an exclusive flock, so a shared flock here
+    means a read never lands between the two."""
+    with open(path, encoding="utf-8", errors="replace") as handle:
+        if fcntl is not None:
+            try:
+                fcntl.flock(handle, fcntl.LOCK_SH | fcntl.LOCK_NB)
+            except BlockingIOError:
+                return None
+        return handle.read()
+
+
 class ConfigStore:
     """Loads settings, private values and fixtures, and reloads them when the files change."""
 
-    def __init__(self, paths):
+    def __init__(self, paths, clock=time.monotonic):
         self.paths = paths
+        self._clock = clock
+        self._config_keys = set()
+        self._suspect = None  # (text, first seen) of a read that looks caught mid-write
         self.settings = Settings()
         self.fixtures = ()
         self._private = {}
@@ -447,11 +473,32 @@ class ConfigStore:
         return self.settings.warnings + self._load_warnings
 
     def _read_config(self):
+        """The plugin config's values, or None to keep the last good copy and read again."""
         try:
-            with open(self.paths.config_file, encoding="utf-8", errors="replace") as handle:
-                return parse_plugin_config(handle.read())
+            text = _read_shared(self.paths.config_file)
         except FileNotFoundError:
             return {}
+        if text is None:
+            return None
+        raw = parse_plugin_config(text)
+        if self._looks_torn(text, raw):
+            return None
+        self._config_keys = set(raw)
+        self._suspect = None
+        return raw
+
+    def _looks_torn(self, text, raw):
+        """FPP ends every line and never drops a key, so a read that ends mid-line or has
+        lost keys was probably caught mid-write by something that doesn't lock. Read as it
+        is, it could turn personal use off and release the heads in a blackout. It's
+        believed only once it has stayed the same for a moment."""
+        if not ((text and not text.endswith("\n")) or not self._config_keys <= set(raw)):
+            return False
+        now = self._clock()
+        if self._suspect is None or self._suspect[0] != text:
+            self._suspect = (text, now)
+            return True
+        return now - self._suspect[1] < SUSPECT_READ_ACCEPT_S
 
     def reload(self):
         """Reload if any file changed. Returns True if it did."""
@@ -470,6 +517,10 @@ class ConfigStore:
         except OSError:
             raw = None
             problems.append("Could not read the plugin settings; keeping the last good copy.")
+        else:
+            if raw is None:
+                self._signatures = None  # being written: read it all again next time
+                return False
         try:
             private = _read_json(paths.private_file, {})
             if not isinstance(private, dict):

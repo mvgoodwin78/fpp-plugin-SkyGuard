@@ -355,6 +355,8 @@ class DaemonRig:
     def tick(self, steps=1):
         for _ in range(steps):
             self.time += 1
+            self.daemon.fpp_watch.poll_once()
+            self.daemon.feed.set_in_schedule(self.daemon.fpp_watch.in_show(self.time))
             self.daemon.feed.poll_once()
             self.daemon.feed.health_once()
             self.daemon.step()
@@ -555,7 +557,13 @@ class NoticeAndConfirmationDaemonTests(unittest.TestCase):
         rig.tick(2)
         self.assertEqual(rig.daemon.engine.state, "BLACKOUT")
         with open(rig.paths.config_file, "w", encoding="utf-8") as handle:
-            handle.write('source_mode = "receiver"\nreceiver_url = "http://rx/aircraft.json"\nradius_receiver = "10"\n')
+            handle.write(
+                'source_mode = "receiver"\nreceiver_url = "http://rx/aircraft.json"\n'
+                'personal_use_confirmed = "0"\nradius = "10"\nradius_receiver = "10"\n'
+            )
+        # The same size as before, so make sure the change is seen whatever the clock's resolution.
+        info = os.stat(rig.paths.config_file)
+        os.utime(rig.paths.config_file, ns=(info.st_atime_ns, info.st_mtime_ns + 1_000_000_000))
         rig.tick()
         self.assertEqual(rig.daemon.engine.reason, "not_confirmed")
         self.assertEqual(rig.fpp.ranges, {})

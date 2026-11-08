@@ -187,6 +187,16 @@ def _write_pid(path):
         handle.write(str(os.getpid()))
 
 
+def _close_inherited_descriptors():
+    """Started from fppd's lifecycle hook, this process could inherit fppd's open sockets.
+    Holding them would keep them alive across an fppd restart, so let go of all of them."""
+    try:
+        limit = min(os.sysconf("SC_OPEN_MAX"), 65536)
+    except (AttributeError, ValueError, OSError):
+        limit = 1024
+    os.closerange(3, limit)
+
+
 def main(argv=None):
     argv = sys.argv[1:] if argv is None else argv
     action = argv[0] if argv else ""
@@ -198,6 +208,7 @@ def main(argv=None):
         print("usage: python3 -m skyguard.supervisor run|stop", file=sys.stderr)
         return 2
 
+    _close_inherited_descriptors()
     setup_logging(paths)
     lock = _take_single_instance_lock(paths.supervisor_lock_file)
     if lock is None:

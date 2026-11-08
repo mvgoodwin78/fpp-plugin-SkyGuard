@@ -15,7 +15,7 @@ An FPP plugin that blacks out moving-head light output whenever an aircraft is i
 
 ## What it sends, and to whom
 
-- **Online flight data:** your show's location and search radius go to the provider you choose.
+- **Online flight data:** your show's location and search radius go to the provider you choose, during a show only, unless you turn on checking between shows. The default data source is your own receiver, so nothing goes online until you choose online data.
 - **Map:** while a map is open, your browser loads images from OpenStreetMap, which shows it roughly where your show is. Clear the map address under Advanced to stop this.
 - **Address lookup:** a typed address goes to OpenStreetMap's Nominatim, only when you press Look up.
 - **Local receiver:** requests go to the address you enter.

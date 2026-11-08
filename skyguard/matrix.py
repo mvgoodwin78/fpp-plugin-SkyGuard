@@ -93,11 +93,11 @@ class MatrixController:
         wanted = settings.matrix_models if text else ()
         for model in wanted:
             self._show(model, text, settings)
-        for model in [m for m in self._ledger.matrix if m not in wanted]:
+        for model in [m for m in self._ledger.matrix_models() if m not in wanted]:
             self._clear(model)
 
     def clear_all(self):
-        for model in list(self._ledger.matrix):
+        for model in self._ledger.matrix_models():
             self._clear(model, force=True)
 
     def _message(self, state, reason, count, settings):
@@ -124,8 +124,7 @@ class MatrixController:
             info = self._api.get_model(model)
             current = int(info.get("isActive", STATE_DISABLED))
             if model not in self._ledger.matrix:
-                self._ledger.matrix[model] = current
-                self._ledger.save()
+                self._ledger.remember_matrix(model, current)
             elif scrolling and previous is not None and info.get("effectRunning"):
                 return  # let the current pass finish
             if current == STATE_DISABLED:
@@ -176,8 +175,7 @@ class MatrixController:
                 self._log_once(model, f"Could not clear the message on '{model}': {error}")
                 return
             _logger.warning("Message model '%s' is gone; forgetting it.", model)
-        del self._ledger.matrix[model]
-        self._ledger.save()
+        self._ledger.forget_matrix(model)
         self._sent.pop(model, None)
         self._last_attempt.pop(model, None)
         self._error_logged.discard(model)

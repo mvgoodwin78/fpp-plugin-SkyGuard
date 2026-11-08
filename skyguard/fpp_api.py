@@ -158,14 +158,19 @@ class ShowDetector:
         self._clock = clock
         self._last_total = None
         self._last_moved = None
+        self.uptime = None  # fppd's uptime in seconds from the last read, or None
 
     def read(self):
+        self.uptime = None
         try:
             status = self._api.get_status()
         except FppError:
             return True
         if not isinstance(status, dict):
             return True
+        uptime = status.get("uptimeTotalSeconds")
+        if isinstance(uptime, (int, float)) and not isinstance(uptime, bool):
+            self.uptime = uptime
         bridging = status.get("bridging") not in (None, False, 0, "0")
         if in_schedule_from_status({**status, "bridging": False}):
             return True

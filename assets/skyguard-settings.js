@@ -90,7 +90,7 @@ function skyGuardSettingSaved(key) {
 
     function sourceMode() {
         var field = byId('source_mode');
-        return field ? field.value : 'both';
+        return field ? field.value : 'receiver';
     }
 
     /* ---- showing only what applies to the data sources chosen ---- */
@@ -203,7 +203,7 @@ function skyGuardSettingSaved(key) {
             var query = byId('skyGuardAddress').value.trim();
             results.replaceChildren();
             note.textContent = 'Looking up…';
-            request('GET', API + 'geocode?q=' + encodeURIComponent(query)).then(function (doc) {
+            request('POST', API + 'geocode', { q: query }).then(function (doc) {
                 note.textContent = doc.results.length
                     ? 'Choose one. ' + doc.attribution + '.'
                     : 'Nothing found for that address.';
@@ -754,9 +754,9 @@ function skyGuardSettingSaved(key) {
                 tab: 'skyGuardTabData',
                 skippable: true,
                 buttons: [
-                    { label: 'No, use online data', primary: true, run: function (next) { chooseSource('online', next); } },
+                    { label: 'Yes, my receiver only', run: function (next) { chooseSource('receiver', next); } },
                     { label: 'Yes, with online data as a check and a backup', run: function (next) { chooseSource('both', next); } },
-                    { label: 'Yes, my receiver only', run: function (next) { chooseSource('receiver', next); } }
+                    { label: 'No, use online data', run: function (next) { chooseSource('online', next); } }
                 ]
             },
             {

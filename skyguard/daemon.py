@@ -1,7 +1,8 @@
 """The long-running daemon. The trigger engine decides; everything else follows its state.
 
-Order inside each step matters: the channel ranges are applied before anything slower,
-and the matrix runs on its own thread, so nothing can delay a blackout.
+Order inside each step matters: the channel ranges are applied before anything slower.
+FPP's status and output configuration are read on the FPP watch thread, the feeds and
+the matrix have threads of their own, so a slow FPP or feed can't delay a blackout.
 
 Run with: python3 -m skyguard.daemon
 """
@@ -20,18 +21,18 @@ from . import commands
 from .config import ConfigStore, Paths
 from .feed_manager import FeedManager
 from .fpp_api import BASE_URL, FppApi, FppError, ShowDetector
+from .fpp_watch import FppWatcher
 from .matrix import MatrixController
-from .notifier import LOGGER_NAME, LogSink, Notifier, WarningSink
+from .notifier import LOGGER_NAME, LogSink, Notifier, RepeatLimiter, WarningSink
 from .overlay import ChannelResolver, Ledger, OverlayController, blackout_target
 from .status import StatusWriter, build_status, load_events, recent_events
-from .config import FEED_ONLINE
+from .config import FEED_ONLINE, FEED_RECEIVER
 from .trigger import BLACKOUT, IDLE, Inputs, TriggerEngine, evaluate_zone, merge_zones, split_cross_check
 
 ONLINE_LAG_NOTICE = (
     "Online flight data can lag behind real aircraft. Increase your radius by 3 miles to allow for it."
 )
 STEP_TICK_S = 0.25
-SCHEDULE_READ_S = 1.0
 SETTING_RETRY_S = 5.0
 MATRIX_TICK_S = 0.25
 MATRIX_JOIN_S = 0.5
@@ -68,7 +69,7 @@ class Daemon:
         self._wall_clock = wall_clock
         self._stop = threading.Event()
 
-        self.store = ConfigStore(paths)
+        self.store = ConfigStore(paths, clock=clock)
         self.warning_sink = WarningSink()
         self.notifier = Notifier([LogSink(), self.warning_sink])
 
@@ -87,11 +88,10 @@ class Daemon:
         self.resolver = ChannelResolver(api, self.notifier, clock)
         self.matrix = MatrixController(api, self.ledger, clock)
         self.status_writer = StatusWriter(paths.status_file, clock)
-        self._show = ShowDetector(api, clock)
+        self.fpp_watch = FppWatcher(ShowDetector(api, clock), self.resolver, clock)
         self._events = load_events(paths.status_file)
 
         self._in_schedule = False
-        self._last_schedule_read = None
         self._pending_enabled = None
         self._last_setting_attempt = None
         self._logged_warnings = set()
@@ -106,6 +106,8 @@ class Daemon:
         self._matrix_lock = threading.Lock()
         self._matrix_request = None
         self._matrix_thread = None
+        self._step_errors = RepeatLimiter(_logger)
+        self._matrix_errors = RepeatLimiter(_logger)
 
     # Settings and commands ------------------------------------------------------
 
@@ -188,11 +190,11 @@ class Daemon:
     # One pass of the main loop --------------------------------------------------
 
     def _read_schedule(self, now):
-        due = self._last_schedule_read is None or now - self._last_schedule_read >= SCHEDULE_READ_S
-        if due:
-            self._last_schedule_read = now
-            self._in_schedule = self._show.read()
-            self.feed.set_in_schedule(self._in_schedule)
+        """Takes the FPP watch thread's latest reading, without waiting on FPP."""
+        self._in_schedule = self.fpp_watch.in_show(now)
+        self.feed.set_in_schedule(self._in_schedule)
+        if self.fpp_watch.take_restart():
+            self.overlay.force_resend()
 
     def _evaluate(self, feed_state):
         settings = self.settings
@@ -213,6 +215,13 @@ class Daemon:
             )
 
         seen, missed = split_cross_check(feed_state.aircraft, feed_state.cross_check)
+        if feed_state.active_feed == FEED_RECEIVER:
+            # Just after the receiver takes over again, the aircraft in hand can still be the
+            # online feed's. Online data goes by the online radius, whichever feed is in use.
+            leftover = tuple(record for record in seen if record.source.startswith("online"))
+            if leftover:
+                seen = tuple(record for record in seen if not record.source.startswith("online"))
+                missed = missed + leftover
         zone = judge(seen, settings.radius_nm_for(feed_state.active_feed))
         if missed:
             zone = merge_zones(zone, judge(missed, settings.radius_nm_for(FEED_ONLINE)))
@@ -266,6 +275,7 @@ class Daemon:
         """One pass: read inputs, decide, apply. Never raises."""
         try:
             self._step()
+            self._step_errors.clear()
             if self._error_active:
                 self._error_active = False
                 self.notifier.emit("internal_ok")
@@ -298,7 +308,7 @@ class Daemon:
         if transition is not None:
             self._log_transition(transition)
 
-        resolved = self.resolver.refresh(self.store.fixtures)
+        resolved = self.resolver.resolve(self.store.fixtures)
         target = blackout_target(resolved)
         self._hold_after_corrupt_ledger(target)
         self._report_fixture_setup(settings, target)
@@ -313,9 +323,20 @@ class Daemon:
         missing = settings.enabled and settings.personal_use_confirmed and not target
         self.notifier.emit("no_fixtures" if missing else "fixtures_set")
 
+    def _blackout_hold(self, target):
+        """Every fixture channel. Until FPP's outputs have been read once, heads set by
+        universe can't be placed, so whatever an earlier run held stays held as well:
+        otherwise a restart during a blackout would release them while an aircraft is
+        overhead, for as long as FPP takes to answer."""
+        hold = dict(target)
+        if not self.resolver.ready:
+            for channel, value in self.ledger.channels_copy().items():
+                hold.setdefault(channel, value)
+        return hold
+
     def _channels_to_hold(self, now, resolved, target):
         """Everything during a blackout, otherwise only the head being tested, if any."""
-        hold = dict(target) if self.engine.state == BLACKOUT else {}
+        hold = self._blackout_hold(target) if self.engine.state == BLACKOUT else {}
         if self._head_test is not None:
             fixture_id, until = self._head_test
             if now >= until or not (self.settings.enabled and self.settings.personal_use_confirmed):
@@ -329,13 +350,13 @@ class Daemon:
     def _handle_step_error(self):
         """Something unexpected happened, so what the heads are doing is unknown. During a
         show, fail dark: a darkened show is better than a beam on an aircraft."""
-        _logger.exception("Unexpected error in the main loop")
+        self._step_errors.exception("Unexpected error in the main loop")
         if not self._error_active:
             self._error_active = True
             self.notifier.emit("internal_error")
         if self._in_schedule and self.settings.enabled:
             try:
-                self.overlay.sync(blackout_target(self.resolver.resolved))
+                self.overlay.sync(self._blackout_hold(blackout_target(self.resolver.resolved)))
             except Exception:
                 _logger.exception("Could not hold the heads dark after the error")
 
@@ -394,8 +415,9 @@ class Daemon:
         while not self._stop.wait(MATRIX_TICK_S):
             try:
                 self.matrix_step()
+                self._matrix_errors.clear()
             except Exception:
-                _logger.exception("Unexpected error updating the matrix message")
+                self._matrix_errors.exception("Unexpected error updating the matrix message")
 
     # Life cycle -----------------------------------------------------------------
 
@@ -404,6 +426,12 @@ class Daemon:
 
     def run(self):
         _logger.info("SkyGuard daemon started")
+        # One reading first, so the first step knows whether a show is on.
+        try:
+            self.fpp_watch.poll_once()
+        except Exception:
+            _logger.exception("Could not read FPP's status at start")
+        self.fpp_watch.start()
         self.feed.start()
         self._matrix_thread = threading.Thread(target=self._matrix_loop, name="skyguard-matrix", daemon=True)
         self._matrix_thread.start()
@@ -417,6 +445,7 @@ class Daemon:
         self._stop.set()
         # First, because the stop has a short time budget and a feed may be mid-request.
         released = self.overlay.release_all()
+        self.fpp_watch.stop(timeout_s=0.1)
         self.feed.stop(timeout_s=0.2)
         if self._matrix_thread is not None:
             self._matrix_thread.join(MATRIX_JOIN_S)
