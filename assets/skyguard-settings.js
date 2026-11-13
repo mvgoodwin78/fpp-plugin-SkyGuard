@@ -105,6 +105,14 @@ function skyGuardSettingSaved(key) {
         document.querySelectorAll('[data-show-with="online"]').forEach(function (element) {
             element.hidden = !usesOnline;
         });
+        var location = byId('receiver_location');
+        var here = location ? location.value === 'this_box' : false;
+        document.querySelectorAll('[data-show-with="receiver-here"]').forEach(function (element) {
+            element.hidden = !usesReceiver || !here;
+        });
+        document.querySelectorAll('[data-show-with="receiver-other"]').forEach(function (element) {
+            element.hidden = !usesReceiver || here;
+        });
         var provider = byId('online_provider');
         var name = provider ? provider.value : 'adsb.fi';
         byId('skyGuardProviderCredit').hidden = name !== 'adsb.fi';
@@ -159,7 +167,8 @@ function skyGuardSettingSaved(key) {
             result.textContent = 'Testing…';
             request('POST', path, body).then(function (doc) {
                 result.className = 'small ms-2 text-success';
-                result.textContent = 'Working: ' + doc.aircraft + ' aircraft seen.';
+                result.textContent = 'Working: ' + doc.aircraft + ' aircraft seen' +
+                    (doc.decoders ? ', from ' + doc.decoders.join(' and ') : '') + '.';
             }).catch(function (error) {
                 result.className = 'small ms-2 text-danger';
                 result.textContent = error.message;
@@ -881,6 +890,9 @@ function skyGuardSettingSaved(key) {
             urlBody('skyGuardReceiverUrl', 'skyGuardTestReceiverResult'));
         runTest('skyGuardTest978', 'skyGuardTest978Result', API + 'test-receiver',
             urlBody('skyGuardReceiver978Url', 'skyGuardTest978Result'));
+        runTest('skyGuardTestLocal', 'skyGuardTestLocalResult', API + 'test-receiver', function () {
+            return { local: true };
+        });
         runTest('skyGuardTestOnline', 'skyGuardTestOnlineResult', API + 'test-online', function () {
             return { provider: byId('online_provider').value };
         });

@@ -20,12 +20,14 @@ from urllib.parse import urlsplit
 
 from . import REPO_NAME
 from .feeds.online_adsbx_v2 import DEFAULT_PROVIDER, MAX_QUERY_RADIUS_NM, PROVIDERS
+from .feeds.receiver import LOCAL_RECEIVER
 from .geo import to_nm
 
 DEFAULT_MEDIA_DIR = "/home/fpp/media"
 FEED_RECEIVER = "receiver"
 FEED_ONLINE = "online"
 SOURCE_MODES = ("receiver", "online", "both")
+RECEIVER_LOCATIONS = ("other", "this_box")
 RADIUS_UNITS = ("mi", "nm", "km")
 GEOCODERS = ("nominatim", "off")
 MATRIX_POSITIONS = ("Center", "Right to Left", "Left to Right", "Bottom to Top", "Top to Bottom")
@@ -76,7 +78,8 @@ class Paths:
 class Settings:
     enabled: bool = True
     source_mode: str = "receiver"  # the local option, so nothing is sent until online is chosen
-    receiver_url: str = ""
+    receiver_location: str = "other"  # "this_box": read the decoder's own files on the FPP box
+    receiver_url: str = ""  # LOCAL_RECEIVER when the receiver is on this box
     receiver_978_url: str = ""
     online_provider: str = DEFAULT_PROVIDER
     online_api_key: str = ""
@@ -301,6 +304,7 @@ def load_settings(raw, private=None):
     settings = Settings(
         enabled=read.boolean("enabled"),
         source_mode=read.choice("source_mode", SOURCE_MODES),
+        receiver_location=read.choice("receiver_location", RECEIVER_LOCATIONS),
         receiver_url=read.url("receiver_url"),
         receiver_978_url=read.url("receiver_978_url"),
         online_provider=read.choice("online_provider", tuple(PROVIDERS)),
@@ -336,6 +340,9 @@ def load_settings(raw, private=None):
     )
 
     warnings = read.warnings
+    if settings.receiver_location == "this_box":
+        # 978 MHz on this box is found and merged by the local adapter, so no second feed.
+        settings = replace(settings, receiver_url=LOCAL_RECEIVER, receiver_978_url="")
     if settings.alt_floor_ft > settings.alt_ceiling_ft:
         defaults = Settings()
         warnings.append("The altitude floor is above the ceiling; using the default altitude band.")

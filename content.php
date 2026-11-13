@@ -74,6 +74,22 @@ function skyGuardCheckbox($title, $setting, $default) {
             <?php skyGuardRowClose(); ?>
 
             <div data-show-with="receiver">
+                <?php skyGuardRowOpen('Where is your receiver?'); ?>
+                <?php skyGuardSelect('Where is your receiver?', 'receiver_location', 'other', array(
+                    'On another device on my network' => 'other',
+                    'On this FPP box' => 'this_box',
+                )); ?>
+                <?php skyGuardRowClose(); ?>
+            </div>
+
+            <div data-show-with="receiver-here">
+                <?php skyGuardRowOpen('Decoder on this box', '', 'SkyGuard reads the file readsb, dump1090-fa or dump978-fa writes on this box, 1090 MHz and 978 MHz together. No address or web server is needed.'); ?>
+                <button type="button" class="btn btn-sm btn-secondary" id="skyGuardTestLocal">Test</button>
+                <span class="small ms-2" id="skyGuardTestLocalResult"></span>
+                <?php skyGuardRowClose(); ?>
+            </div>
+
+            <div data-show-with="receiver-other">
                 <?php skyGuardRowOpen('Receiver address', '', 'For example http://192.168.1.50/data/aircraft.json'); ?>
                 <input type="url" class="form-control" id="skyGuardReceiverUrl" data-free-text="receiver_url" maxlength="300" aria-label="Receiver address">
                 <button type="button" class="btn btn-sm btn-secondary mt-1" id="skyGuardTestReceiver">Test</button>

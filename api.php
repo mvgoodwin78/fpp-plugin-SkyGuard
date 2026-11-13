@@ -393,6 +393,9 @@ function fppPluginSkyGuardFetchForTest($url, $timeout) {
 // can't be used to read other devices through FPP.
 function fppPluginSkyGuardTestReceiver() {
     $body = fppPluginSkyGuardJsonBody();
+    if ($body !== null && isset($body['local']) && $body['local'] === true) {
+        return fppPluginSkyGuardTestLocalReceiver();
+    }
     if ($body === null || !isset($body['url']) || !is_string($body['url'])) {
         return fppPluginSkyGuardError(400, 'Enter an address.');
     }
@@ -410,6 +413,52 @@ function fppPluginSkyGuardTestReceiver() {
         return fppPluginSkyGuardError(502, 'The answer was not aircraft data.');
     }
     return json(array('status' => 'OK', 'aircraft' => count($doc['aircraft'])));
+}
+
+// The files a decoder on this box writes. Keep in step with skyguard/feeds/receiver.py.
+function fppPluginSkyGuardLocalDecoderFiles() {
+    return array(
+        array('readsb', '/run/readsb/aircraft.json'),
+        array('dump1090-fa', '/run/dump1090-fa/aircraft.json'),
+        array('dump1090', '/run/dump1090/aircraft.json'),
+        array('dump1090-mutability', '/run/dump1090-mutability/aircraft.json'),
+        array('dump978-fa', '/run/skyaware978/aircraft.json'),
+        array('dump978-fa', '/run/dump978-fa/aircraft.json'),
+    );
+}
+
+// With {"local": true}: looks for a decoder on this box, at fixed paths only.
+function fppPluginSkyGuardTestLocalReceiver() {
+    $found = array();
+    $stale = array();
+    $total = 0;
+    foreach (fppPluginSkyGuardLocalDecoderFiles() as $entry) {
+        list($name, $path) = $entry;
+        if (!is_file($path) || is_link($path)) {
+            continue;
+        }
+        $doc = json_decode(strval(@file_get_contents($path, false, null, 0, 16 * 1024 * 1024)), true);
+        if (!is_array($doc) || !isset($doc['aircraft']) || !is_array($doc['aircraft']) || !isset($doc['now'])) {
+            continue;
+        }
+        $now = floatval($doc['now']);
+        if ($now > 1e11) {
+            $now /= 1000.0;
+        }
+        if (abs(time() - $now) > 10) {
+            $stale[] = $name;
+            continue;
+        }
+        $found[] = $name;
+        $total += count($doc['aircraft']);
+    }
+    if (count($found) > 0) {
+        return json(array('status' => 'OK', 'aircraft' => $total, 'decoders' => array_values(array_unique($found))));
+    }
+    if (count($stale) > 0) {
+        return fppPluginSkyGuardError(502, 'Found ' . implode(' and ', array_unique($stale)) . ' on this box, but its data has stopped updating. Is the decoder running?');
+    }
+    return fppPluginSkyGuardError(502, 'No decoder found on this box. SkyGuard reads the aircraft.json that readsb, dump1090-fa or dump978-fa writes under /run. If yours runs here, check that it writes JSON (readsb: --write-json /run/readsb).');
 }
 
 // POST /api/plugin/fpp-plugin-SkyGuard/test-online

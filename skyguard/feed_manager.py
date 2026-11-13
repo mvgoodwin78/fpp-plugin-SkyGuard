@@ -24,8 +24,10 @@ from .feeds.base import FeedError
 from .feeds.http_client import DEFAULT_TIMEOUT_S, FeedHttpError, fetch_json
 from .feeds.online_adsbx_v2 import PROVIDERS, OnlineAdapter
 from .feeds.receiver import (
+    LOCAL_RECEIVER,
     SOURCE_RECEIVER,
     SOURCE_RECEIVER_978,
+    LocalReceiverAdapter,
     ReceiverAdapter,
     merge_snapshots,
 )
@@ -155,8 +157,13 @@ class FeedManager:
     def _primary_adapter(self):
         if not self._primary_url:
             return None
+        if self._primary_url == LOCAL_RECEIVER:
+            return self._local_adapter()
         source = SOURCE_RECEIVER if self._settings.receiver_url else SOURCE_RECEIVER_978
         return ReceiverAdapter(self._primary_url, source, self._fetch)
+
+    def _local_adapter(self):
+        return LocalReceiverAdapter()
 
     def _online_adapter(self):
         settings = self._settings

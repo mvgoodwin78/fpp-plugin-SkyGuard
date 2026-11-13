@@ -123,7 +123,7 @@ Each source is an adapter returning a normalized aircraft list, so new receivers
 
 | Adapter | Input | Notes |
 | --- | --- | --- |
-| Local receiver | `aircraft.json` from a user-entered URL on a separate Pi | Must accept readsb, dump1090-fa, tar1090 and dump978-fa formats (receiver software is undecided). Optional second URL for a separate 978 MHz decoder; aircraft lists combined by ICAO hex |
+| Local receiver | `aircraft.json` from a user-entered URL on a separate Pi, or, with `receiver_location` = `this_box`, read straight from the file a decoder on the FPP box writes (fixed paths under `/run`: readsb, dump1090-fa, dump1090, dump1090-mutability, and skyaware978 or dump978-fa for 978 MHz; never a path from the settings, since the daemon is root; no symlinks; the newest file wins and a fresh 978 file is merged in). FPP's Apache needs no change | Must accept readsb, dump1090-fa, tar1090 and dump978-fa formats (receiver software is undecided). Optional second URL for a separate 978 MHz decoder; aircraft lists combined by ICAO hex |
 | Online, ADSBx-v2-compatible | Point/radius query to the chosen provider | Provider picked from a list; see Online providers. The radius is in nautical miles and the aircraft list is under `ac`, with `now` in milliseconds |
 | Online, keyed provider | Same, with a user API key | Optional; key stored in plugin config, never logged |
 
@@ -448,6 +448,7 @@ Every setting below lives in `config/plugin.fpp-plugin-SkyGuard` except the fixt
 | --- | --- | --- |
 | `enabled` | true | Set by Enable/Disable commands too |
 | `source_mode` | receiver | `receiver`, `online`, `both`. The local option is the default (guidelines §14.2), so nothing is sent online until the user picks it |
+| `receiver_location` | other | `other` (another device, by address) or `this_box` (the decoder's files on the FPP box; the two address settings are then ignored) |
 | `receiver_url` | empty | e.g. `http://<receiver-ip>/data/aircraft.json` |
 | `receiver_978_url` | empty | Optional second decoder |
 | `online_provider` | adsb.fi | From the provider list |

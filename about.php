@@ -17,7 +17,7 @@
         <p>Open <strong>Content Setup, SkyGuard Settings</strong>. A guided setup appears the first time, and everything in it can be changed later on the tabs.</p>
         <ol class="mb-0">
             <li><strong>Confirm personal use.</strong> SkyGuard is for personal use only and stays idle until you confirm this.</li>
-            <li><strong>Choose your data.</strong> Use your own ADS-B receiver, online data, or both. On the Data Source tab, the Test buttons show whether each source answers.</li>
+            <li><strong>Choose your data.</strong> Use your own ADS-B receiver, online data, or both. Your receiver can be on another device on your network, or on the FPP box itself: then SkyGuard reads what readsb, dump1090-fa or dump978-fa writes there, with no address needed. On the Data Source tab, the Test buttons show whether each source answers.</li>
             <li><strong>Set the location and zone.</strong> Enter the center point and a radius for each source in use, and set the lowest and highest altitudes that count. SkyGuard stays idle until the center and radii are entered. Online data can lag behind real aircraft, so increase your online radius by 3 miles to allow for it.</li>
             <li><strong>Add your heads.</strong> On the Fixtures tab, add one row per head with its dimmer and shutter channels, and the value that means off for each. Use a universe for E1.31 or Art-Net, or a start channel for an output with no universe number, such as USB DMX. Channel numbers are the head's actual DMX addresses, not offsets. Check your fixture's manual for its off values.</li>
             <li><strong>Add a message, if you want one.</strong> The Matrix Message tab can show text on your LED panels during a blackout. Test on panels runs until you press Stop, and shows a live view of the first panel you ticked.</li>
@@ -83,7 +83,7 @@
             <dd>During a show the heads stay dark until data returns. Use the Test buttons on the Data Source tab to find out which source has stopped.</dd>
 
             <dt>"The receiver isn't responding" or "Using the online feed"</dt>
-            <dd>Check that your receiver is on and that its address is right. SkyGuard goes back to it by itself when it answers.</dd>
+            <dd>Check that your receiver is on and that its address is right. For a receiver on the FPP box, check that the decoder is running and writes JSON (for readsb, <code>--write-json /run/readsb</code>). SkyGuard goes back to it by itself when it answers.</dd>
 
             <dt>A head says "Universe not found"</dt>
             <dd>FPP has no active output with that universe number. Check Input/Output Setup, or use a start channel if the output has no universe number. That head won't black out until this is fixed.</dd>
@@ -120,7 +120,7 @@
             <li><strong>Online flight data:</strong> your show's location and search radius go to the provider you choose, during a show. Between shows nothing goes unless you turn on "Check online data between shows", and nothing goes while SkyGuard is disabled or before you confirm personal use.</li>
             <li><strong>Map:</strong> while a map is open, your browser loads images from OpenStreetMap, which shows it roughly where your show is. Clear the map address under Advanced to stop this.</li>
             <li><strong>Address lookup:</strong> a typed address goes to OpenStreetMap only when you press Look up.</li>
-            <li><strong>Your receiver:</strong> requests go to the address you enter.</li>
+            <li><strong>Your receiver:</strong> requests go to the address you enter. A receiver on the FPP box is read from its files, with no network request.</li>
             <li><strong>On your network:</strong> anyone who can reach FPP can read SkyGuard's status, including your location, and change its settings.</li>
         </ul>
     </fieldset>
