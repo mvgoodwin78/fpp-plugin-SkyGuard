@@ -182,7 +182,7 @@
 		"/api/plugin/fpp-plugin-SkyGuard/test-receiver": {
 			"post": {
 				"summary": "Check a receiver address",
-				"description": "Runs from FPP. Reports an aircraft count or an error, and never passes on what the address sent back.",
+				"description": "Runs from FPP. Reports an aircraft count or an error, and never passes on what the address sent back. With {\"local\": true} instead of a url, checks for a decoder on this box (fixed files under /run).",
 				"requestBody": {
 					"required": true,
 					"description": "url",
@@ -203,6 +203,40 @@
 					},
 					"502": {
 						"description": "It couldn't be reached or didn't send aircraft data"
+					}
+				}
+			}
+		},
+		"/api/plugin/fpp-plugin-SkyGuard/elevation": {
+			"post": {
+				"summary": "Look up the ground elevation at the saved center point",
+				"description": "Sends the saved center point to api.open-meteo.com once, only when the user presses Look it up. Returns elevation_ft; the page saves it as show_elevation_ft. A POST with a JSON body, so another website can't trigger it.",
+				"requestBody": {
+					"required": true,
+					"description": "{}",
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "The elevation in feet"
+					},
+					"400": {
+						"description": "No center point saved"
+					},
+					"415": {
+						"description": "Not sent as JSON"
+					},
+					"429": {
+						"description": "Asked within 2 seconds of the last lookup"
+					},
+					"502": {
+						"description": "The elevation service couldn't be reached or sent an unusable answer"
 					}
 				}
 			}

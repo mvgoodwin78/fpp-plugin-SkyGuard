@@ -29,6 +29,8 @@ class FakeFpp:
         self.universes_status = 200
         self.fonts = ["Helvetica", "Courier"]
         self.models = {}
+        self.model_list = []  # what /api/overlays/models lists
+        self.model_list_status = 200
         self.commands = []
         self.requests = []
         server = self
@@ -92,6 +94,8 @@ class FakeFpp:
             return self.bridge_stats_status, self.bridge_stats
         if path == "/api/channel/output/universeOutputs":
             return self.universes_status, self.universes
+        if path == "/api/overlays/models":
+            return self.model_list_status, self.model_list
         if path == "/api/overlays/fonts":
             return 200, self.fonts
         if path.startswith("/api/plugin/fpp-plugin-SkyGuard/settings/"):

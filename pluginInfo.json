@@ -10,7 +10,7 @@
 	"allowUpdates": 1,
 	"releaseNotesStyle": "gitHistory",
 	"privacy": {
-		"summary": "Blacks out moving heads when aircraft are near. Can send your location to a flight data service and a typed address to OpenStreetMap. Your browser loads map images from OpenStreetMap.",
+		"summary": "Blacks out moving heads when aircraft are near. Can send your location to flight data and elevation services, and a typed address to OpenStreetMap. Your browser loads OpenStreetMap map images.",
 		"sends": [
 			{
 				"to": "tile.openstreetmap.org",
@@ -34,6 +34,12 @@
 				"to": "nominatim.openstreetmap.org",
 				"what": "the address you type",
 				"why": "to find its map position, only when you press Look up",
+				"alwaysOn": false
+			},
+			{
+				"to": "api.open-meteo.com",
+				"what": "your show's location",
+				"why": "to find its ground elevation, only when you press Look it up",
 				"alwaysOn": false
 			},
 			{

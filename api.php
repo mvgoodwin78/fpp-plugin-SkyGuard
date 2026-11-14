@@ -7,6 +7,7 @@ function getEndpointsfpppluginSkyGuard() {
         array('method' => 'GET', 'endpoint' => 'status', 'callback' => 'fppPluginSkyGuardStatus'),
         array('method' => 'GET', 'endpoint' => 'headerIndicator', 'callback' => 'fppPluginSkyGuardHeaderIndicator'),
         array('method' => 'POST', 'endpoint' => 'geocode', 'callback' => 'fppPluginSkyGuardGeocode'),
+        array('method' => 'POST', 'endpoint' => 'elevation', 'callback' => 'fppPluginSkyGuardElevation'),
         array('method' => 'GET', 'endpoint' => 'private', 'callback' => 'fppPluginSkyGuardPrivateGet'),
         array('method' => 'PUT', 'endpoint' => 'private', 'callback' => 'fppPluginSkyGuardPrivatePut'),
         array('method' => 'GET', 'endpoint' => 'fixtures', 'callback' => 'fppPluginSkyGuardFixtureList'),
@@ -246,6 +247,15 @@ function fppPluginSkyGuardCleanFixture($row) {
     $clean['name'] = trim($name);
     $clean['enabled'] = !isset($row['enabled']) || filter_var($row['enabled'], FILTER_VALIDATE_BOOLEAN);
 
+    $model = isset($row['model']) ? $row['model'] : null;
+    if ($model === null || $model === '') {
+        $clean['model'] = null;
+    } elseif (!is_string($model) || strlen($model) > 128 || preg_match('/[\x00-\x1f]/', $model)) {
+        return 'A model name can have up to 128 characters.';
+    } else {
+        $clean['model'] = trim($model);
+    }
+
     foreach (array('universe', 'start_channel', 'dimmer_ch', 'dimmer_off', 'shutter_ch', 'shutter_off') as $field) {
         $value = isset($row[$field]) ? $row[$field] : null;
         if ($value === null || $value === '') {
@@ -459,6 +469,45 @@ function fppPluginSkyGuardTestLocalReceiver() {
         return fppPluginSkyGuardError(502, 'Found ' . implode(' and ', array_unique($stale)) . ' on this box, but its data has stopped updating. Is the decoder running?');
     }
     return fppPluginSkyGuardError(502, 'No decoder found on this box. SkyGuard reads the aircraft.json that readsb, dump1090-fa or dump978-fa writes under /run. If yours runs here, check that it writes JSON (readsb: --write-json /run/readsb).');
+}
+
+// POST /api/plugin/fpp-plugin-SkyGuard/elevation with {}
+// The ground elevation at the saved center point, from Open-Meteo (Copernicus DEM, 90 m).
+// Sends the location once, only when Look up is pressed. A JSON POST, so another site can't
+// trigger it. Returns the elevation in feet; the page saves it as show_elevation_ft.
+function fppPluginSkyGuardElevation() {
+    if (fppPluginSkyGuardJsonBody() === null) {
+        return fppPluginSkyGuardError(415, 'Expected JSON.');
+    }
+    $doc = fppPluginSkyGuardReadJson(fppPluginSkyGuardDataDir() . '/private.json', array());
+    if (!isset($doc['center_lat'], $doc['center_lon'])) {
+        return fppPluginSkyGuardError(400, 'Save a center point first.');
+    }
+    $stamp = fppPluginSkyGuardDataDir() . '/.elevation-lookup';
+    if (is_file($stamp) && time() - filemtime($stamp) < 2) {
+        return fppPluginSkyGuardError(429, 'Please wait a moment and try again.');
+    }
+    if (is_writable(fppPluginSkyGuardDataDir())) {
+        touch($stamp);
+    }
+    $url = sprintf(
+        'https://api.open-meteo.com/v1/elevation?latitude=%s&longitude=%s',
+        number_format(floatval($doc['center_lat']), 5, '.', ''),
+        number_format(floatval($doc['center_lon']), 5, '.', '')
+    );
+    $result = fppPluginSkyGuardFetchForTest($url, 5);
+    if ($result[1] !== null) {
+        return fppPluginSkyGuardError(502, 'Could not reach the elevation service. ' . $result[1]);
+    }
+    $values = isset($result[0]['elevation']) ? $result[0]['elevation'] : null;
+    if (!is_array($values) || count($values) < 1 || !is_numeric($values[0])) {
+        return fppPluginSkyGuardError(502, 'The elevation service sent an unreadable answer.');
+    }
+    $feet = intval(round(floatval($values[0]) * 3.28084));
+    if ($feet < -1500 || $feet > 15000) {
+        return fppPluginSkyGuardError(502, 'The elevation service sent an unlikely value.');
+    }
+    return json(array('status' => 'OK', 'elevation_ft' => $feet, 'attribution' => 'Elevation data: Open-Meteo, Copernicus DEM'));
 }
 
 // POST /api/plugin/fpp-plugin-SkyGuard/test-online

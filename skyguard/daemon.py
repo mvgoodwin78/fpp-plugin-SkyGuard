@@ -85,7 +85,7 @@ class Daemon:
         self._needs_ledger_adopt = self.ledger.corrupt
 
         self.overlay = OverlayController(api, self.ledger, self.notifier, clock)
-        self.resolver = ChannelResolver(api, self.notifier, clock)
+        self.resolver = ChannelResolver(api, self.notifier, clock, known_path=paths.model_channels_file)
         self.matrix = MatrixController(api, self.ledger, clock)
         self.status_writer = StatusWriter(paths.status_file, clock)
         self.fpp_watch = FppWatcher(ShowDetector(api, clock), self.resolver, clock)
@@ -212,6 +212,7 @@ class Daemon:
                 settings.count_no_position,
                 ignore_ground=settings.ignore_ground,
                 ground_speed_limit_kt=settings.ground_speed_limit_kt,
+                elevation_ft=settings.show_elevation_ft,
             )
 
         seen, missed = split_cross_check(feed_state.aircraft, feed_state.cross_check)

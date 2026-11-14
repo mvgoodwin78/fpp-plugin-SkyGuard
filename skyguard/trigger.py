@@ -50,10 +50,16 @@ class ZoneResult:
     ground_skipped: tuple = ()  # would have counted, but ignored as on the ground; for the log
 
 
-def _altitude_passes(alt_ft, floor_ft, ceiling_ft):
-    """Feeds report pressure altitude. On a high-pressure day, or near a low airport, an
-    aircraft on approach can report below 0 ft, so a floor of 0 or less means no floor."""
-    feet = 0.0 if alt_ft == GROUND else alt_ft
+def height_above_show(alt_ft, elevation_ft):
+    """Feet above the show for a reported altitude: feeds report height above sea level.
+    An aircraft on the ground is taken to be at the show's level."""
+    return 0.0 if alt_ft == GROUND else alt_ft - elevation_ft
+
+
+def _altitude_passes(alt_ft, floor_ft, ceiling_ft, elevation_ft=0.0):
+    """The limits are heights above the show. Feeds report pressure altitude, which on a
+    high-pressure day can read lower than the truth, so a floor of 0 or less means no floor."""
+    feet = height_above_show(alt_ft, elevation_ft)
     if floor_ft > 0 and feet < floor_ft:
         return False
     return feet <= ceiling_ft
@@ -89,8 +95,10 @@ def evaluate_zone(
     count_no_position,
     ignore_ground=False,
     ground_speed_limit_kt=DEFAULT_GROUND_SPEED_LIMIT_KT,
+    elevation_ft=0.0,
 ):
-    """Apply the ground, distance, altitude and no-position rules to one poll's aircraft."""
+    """Apply the ground, distance, altitude and no-position rules to one poll's aircraft.
+    Altitude limits are heights above the show, which is `elevation_ft` above sea level."""
     evaluated = []
     skipped = []
     ground_skipped = []
@@ -100,12 +108,12 @@ def evaluate_zone(
         if record.has_position:
             distance = haversine_nm(center_lat, center_lon, record.lat, record.lon)
             # Inside the radius with no reported altitude counts, failing safe.
-            altitude_ok = not known_altitude or _altitude_passes(record.alt_ft, floor_ft, ceiling_ft)
+            altitude_ok = not known_altitude or _altitude_passes(record.alt_ft, floor_ft, ceiling_ft, elevation_ft)
             in_zone = distance <= radius_nm and altitude_ok
         else:
             distance = None
             # With neither position nor altitude there is nothing to act on.
-            altitude_ok = known_altitude and _altitude_passes(record.alt_ft, floor_ft, ceiling_ft)
+            altitude_ok = known_altitude and _altitude_passes(record.alt_ft, floor_ft, ceiling_ft, elevation_ft)
             in_zone = altitude_ok and count_no_position
             no_position_skip = altitude_ok and not count_no_position
 

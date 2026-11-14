@@ -11,6 +11,7 @@ from .feeds.base import GROUND
 from .geo import from_nm
 from .notifier import LOGGER_NAME
 from .overlay import atomic_write_json
+from .trigger import height_above_show
 
 DISPLAY_RANGE_RADII = 2.0
 PERIODIC_WRITE_S = 5.0  # matches the 5 s map refresh, and spares the SD card a write per second
@@ -36,6 +37,12 @@ def _aircraft_entry(evaluated, settings, feed):
         "lat": record.lat,
         "lon": record.lon,
         "alt_ft": record.alt_ft if record.alt_ft == GROUND or record.alt_ft is None else round(record.alt_ft),
+        # Height above the show, which the altitude limits use; None when unknown or on the ground.
+        "height_ft": (
+            None
+            if record.alt_ft == GROUND or record.alt_ft is None
+            else round(height_above_show(record.alt_ft, settings.show_elevation_ft))
+        ),
         "gs_kt": record.gs_kt,
         "track_deg": record.track_deg,
         "seen_pos_s": record.seen_pos_s,

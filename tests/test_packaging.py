@@ -906,6 +906,20 @@ class LifecycleTests(unittest.TestCase):
         self.assertTrue(rows[0]["id"])
         self.assertEqual(rows[1]["id"], "abc")
 
+    def test_install_turns_universe_rows_into_start_channels(self):
+        os.makedirs(self.paths.data_dir)
+        config_dir = os.path.dirname(self.paths.config_file)
+        os.makedirs(config_dir, exist_ok=True)
+        with open(os.path.join(config_dir, "co-universes.json"), "w", encoding="utf-8") as handle:
+            json.dump({"channelOutputs": [{"enabled": 1, "universes": [
+                {"active": 1, "id": 3, "startChannel": 1025, "channelCount": 512}]}]}, handle)
+        with open(self.paths.fixtures_file, "w", encoding="utf-8") as handle:
+            json.dump([{"id": "a", "name": "Old", "universe": 3, "dimmer_ch": 6}], handle)
+        self.assertEqual(self.run_hook("scripts/fpp_install.sh").returncode, 0)
+        with open(self.paths.fixtures_file, encoding="utf-8") as handle:
+            row = json.load(handle)[0]
+        self.assertEqual((row["start_channel"], row["universe"]), (1025, None))
+
     def test_uninstall_works_with_fppdir_unset(self):
         # uninstall_plugin passes FPPDIR only as an argument, and sudo strips the exported one,
         # so the script must fall back rather than fail. Here it falls back to /opt/fpp,

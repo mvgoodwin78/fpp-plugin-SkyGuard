@@ -181,10 +181,17 @@ function skyGuardCheckbox($title, $setting, $default) {
             <?php skyGuardSelect('Radius unit', 'radius_unit', 'mi', array('Miles' => 'mi', 'Nautical miles' => 'nm', 'Kilometers' => 'km')); ?>
             <?php skyGuardRowClose(); ?>
 
-            <?php skyGuardRowOpen('Lowest altitude', '', '0 includes aircraft on the ground.'); ?>
+            <?php skyGuardRowOpen('Show elevation', '', 'Your show's height above sea level. Aircraft report height above sea level, so SkyGuard subtracts this and the altitudes below become heights above your show. Leave at 0 to measure from sea level.'); ?>
+            <?php skyGuardNumber('show_elevation_ft', -1500, 15000, '0', 'feet'); ?>
+            <button type="button" class="btn btn-sm btn-secondary mt-1" id="skyGuardElevationLookup">Look it up</button>
+            <span class="small ms-2" id="skyGuardElevationNote"></span>
+            <div class="form-text">Look it up sends your saved center point to Open-Meteo once. Save the center point first.</div>
+            <?php skyGuardRowClose(); ?>
+
+            <?php skyGuardRowOpen('Lowest altitude', '', 'Height above your show. 0 includes aircraft on the ground.'); ?>
             <?php skyGuardNumber('alt_floor_ft', -2000, 100000, '0', 'feet'); ?>
             <?php skyGuardRowClose(); ?>
-            <?php skyGuardRowOpen('Highest altitude'); ?>
+            <?php skyGuardRowOpen('Highest altitude', '', 'Height above your show.'); ?>
             <?php skyGuardNumber('alt_ceiling_ft', -2000, 100000, '10000', 'feet'); ?>
             <?php skyGuardRowClose(); ?>
             <?php skyGuardRowOpen('Ignore aircraft on the ground', '', 'Skips aircraft reporting they are on the ground until they reach the speed limit under Advanced.'); ?>
@@ -194,15 +201,19 @@ function skyGuardCheckbox($title, $setting, $default) {
 
         <div class="tab-pane fade" id="skyGuardTabFixtures" role="tabpanel">
             <p class="text-body-secondary small">
-                One row per moving head. Only the channels listed here are forced during a blackout.
-                Use a universe for E1.31 or Art-Net, or a start channel for an output with no universe number, such as USB DMX.
-                Changes save as you make them.
+                One row per moving head. Pick the head's model, then enter its dimmer and shutter channels from the fixture's DMX chart (for example 6 and 7) and the value that turns each off (often 0).
+                SkyGuard works out the FPP channel, shown under the model, and follows the model if you re-patch it in xLights and upload again.
+                Or choose Start channel and enter the head's start channel from xLights.
+                Only these channels are forced during a blackout. Changes save as you make them.
             </p>
+            <div id="skyGuardNoHeadModels" class="alert alert-warning skyguard-alert small" role="status" hidden>
+                FPP has no models for your heads yet. In xLights, use FPP Connect to upload models to this FPP, with the Models column set to All (Local only includes models on this FPP's own outputs). Or choose Start channel.
+            </div>
             <div class="table-responsive">
                 <table class="table table-sm align-middle">
                     <thead>
                         <tr>
-                            <th>Name</th><th>On</th><th>Universe</th><th>Start ch</th>
+                            <th>Name</th><th>On</th><th>Model or start ch</th>
                             <th>Dimmer ch</th><th>Dimmer off</th><th>Shutter ch</th><th>Shutter off</th>
                             <th>Status</th><th></th>
                         </tr>

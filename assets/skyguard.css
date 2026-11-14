@@ -20,6 +20,10 @@
     min-width: 8rem;
 }
 
+.skyguard-fixture-patch {
+    min-width: 12rem;
+}
+
 .skyguard-zone-online {
     stroke: var(--bs-danger);
     fill: var(--bs-danger);

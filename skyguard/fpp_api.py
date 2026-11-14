@@ -85,6 +85,10 @@ class FppApi:
                 return None
             raise
 
+    def get_models(self):
+        """FPP's Pixel Overlay Models, including those xLights uploads through FPP Connect."""
+        return self._get_json("/api/overlays/models")
+
     def set_ranges(self, channels, value):
         for path in _range_paths(channels):
             self._request("PUT", path, {"Value": value})

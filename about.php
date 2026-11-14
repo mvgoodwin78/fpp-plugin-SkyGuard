@@ -18,8 +18,8 @@
         <ol class="mb-0">
             <li><strong>Confirm personal use.</strong> SkyGuard is for personal use only and stays idle until you confirm this.</li>
             <li><strong>Choose your data.</strong> Use your own ADS-B receiver, online data, or both. Your receiver can be on another device on your network, or on the FPP box itself: then SkyGuard reads what readsb, dump1090-fa or dump978-fa writes there, with no address needed. On the Data Source tab, the Test buttons show whether each source answers.</li>
-            <li><strong>Set the location and zone.</strong> Enter the center point and a radius for each source in use, and set the lowest and highest altitudes that count. SkyGuard stays idle until the center and radii are entered. Online data can lag behind real aircraft, so increase your online radius by 3 miles to allow for it.</li>
-            <li><strong>Add your heads.</strong> On the Fixtures tab, add one row per head with its dimmer and shutter channels, and the value that means off for each. Use a universe for E1.31 or Art-Net, or a start channel for an output with no universe number, such as USB DMX. Channel numbers are the head's actual DMX addresses, not offsets. Check your fixture's manual for its off values.</li>
+            <li><strong>Set the location and zone.</strong> Enter the center point and a radius for each source in use, your show's elevation (Look it up fills it in), and the lowest and highest altitudes that count, as heights above your show. SkyGuard stays idle until the center and radii are entered. Online data can lag behind real aircraft, so increase your online radius by 3 miles to allow for it.</li>
+            <li><strong>Add your heads.</strong> On the Fixtures tab, add one row per head and pick its model. Then enter its dimmer and shutter channels from the fixture's DMX chart (for example 6 and 7) and the value that means off for each (often 0; check your fixture's manual). The row shows the FPP channels that gives. If your heads aren't in the model list, upload models from xLights with FPP Connect, with the Models column set to All. Or choose Start channel and enter the head's start channel from xLights.</li>
             <li><strong>Add a message, if you want one.</strong> The Matrix Message tab can show text on your LED panels during a blackout. Test on panels runs until you press Stop, and shows a live view of the first panel you ticked.</li>
             <li><strong>Test it.</strong> Press Test on a row in Fixtures to black out that head for 3 seconds, or Test all heads on the status page for 5 seconds. Watch the real heads: only you can confirm they go dark.</li>
         </ol>
@@ -30,7 +30,7 @@
         <ul>
             <li><strong>It only happens during a show.</strong> A show means a playlist or sequence playing, including one you started by hand, or live E1.31, Art-Net or DDP data arriving at FPP, and for 30 seconds after it stops. That last one means an xLights test session can black out the heads too. Outside a show the state is IDLE and the heads aren't touched, apart from your own tests.</li>
             <li><strong>It starts on the first poll</strong> that finds an aircraft in the zone, and ends once the zone has been clear for the release delay.</li>
-            <li><strong>Altitude limits apply.</strong> An aircraft must be between your lowest and highest altitudes to count. If its altitude is unknown and it's inside the radius, it counts. Aircraft report pressure altitude, which on a high-pressure day can read below 0 for one coming in low, so a lowest altitude of 0 means no lower limit.</li>
+            <li><strong>Altitude limits apply.</strong> An aircraft must be between your lowest and highest altitudes to count. Those are heights above your show: aircraft report height above sea level, so SkyGuard subtracts your show elevation. With the show at 800 ft and a highest altitude of 3,000 ft, aircraft below 3,800 ft above sea level count. If its altitude is unknown and it's inside the radius, it counts. Aircraft report pressure altitude, which on a high-pressure day can read below 0 for one coming in low, so a lowest altitude of 0 means no lower limit.</li>
             <li><strong>Aircraft with no position</strong> count as in the zone if their altitude is in range, unless you turn that off under Advanced.</li>
             <li><strong>Ground traffic:</strong> with "Ignore aircraft on the ground" on, an aircraft reporting it's on the ground is skipped until it reaches the ground speed limit under Advanced, which is 40 knots by default. The map and list show these as <code>ground (ignored)</code>. A helicopter hovering low still counts unless it reports being on the ground.</li>
         </ul>
@@ -85,11 +85,14 @@
             <dt>"The receiver isn't responding" or "Using the online feed"</dt>
             <dd>Check that your receiver is on and that its address is right. For a receiver on the FPP box, check that the decoder is running and writes JSON (for readsb, <code>--write-json /run/readsb</code>). SkyGuard goes back to it by itself when it answers.</dd>
 
+            <dt>A head says "Model not found in FPP"</dt>
+            <dd>The model was renamed or deleted in FPP. If SkyGuard had found it before, it keeps holding the channels the model last had, so the head still goes dark. Pick the model again, or upload your models from xLights again.</dd>
+
             <dt>A head says "Universe not found"</dt>
-            <dd>FPP has no active output with that universe number. Check Input/Output Setup, or use a start channel if the output has no universe number. That head won't black out until this is fixed.</dd>
+            <dd>An older row set by universe, and FPP has no output with that universe number. Pick the head's model or a start channel instead. That head won't black out until this is fixed.</dd>
 
             <dt>A head says "Incomplete"</dt>
-            <dd>The row needs a universe or a start channel, plus a dimmer or shutter channel. SkyGuard ignores it until then.</dd>
+            <dd>The row needs a model or a start channel, plus a dimmer or shutter channel. SkyGuard ignores it until then.</dd>
 
             <dt>A head doesn't go dark during a test</dt>
             <dd>Check the channel numbers and off values against your fixture's manual. The status page shows "Held dark" while SkyGuard is holding a head's channels. If it says that and the head is still lit, the channels or off values are wrong for that fixture.</dd>
@@ -120,6 +123,7 @@
             <li><strong>Online flight data:</strong> your show's location and search radius go to the provider you choose, during a show. Between shows nothing goes unless you turn on "Check online data between shows", and nothing goes while SkyGuard is disabled or before you confirm personal use.</li>
             <li><strong>Map:</strong> while a map is open, your browser loads images from OpenStreetMap, which shows it roughly where your show is. Clear the map address under Advanced to stop this.</li>
             <li><strong>Address lookup:</strong> a typed address goes to OpenStreetMap only when you press Look up.</li>
+            <li><strong>Elevation lookup:</strong> your saved center point goes to Open-Meteo only when you press Look it up.</li>
             <li><strong>Your receiver:</strong> requests go to the address you enter. A receiver on the FPP box is read from its files, with no network request.</li>
             <li><strong>On your network:</strong> anyone who can reach FPP can read SkyGuard's status, including your location, and change its settings.</li>
         </ul>

@@ -141,8 +141,10 @@ function skyGuardSettingSaved(key) {
             }
 
             fixtureProblems = {};
+            fixtureChannels = {};
             (status.fixtures || []).forEach(function (fixture) {
                 fixtureProblems[fixture.id] = fixture.problem;
+                fixtureChannels[fixture.id] = fixture.channels || [];
             });
             updateFixtureBadges();
             latestStatus = status;
@@ -235,6 +237,25 @@ function skyGuardSettingSaved(key) {
         });
     }
 
+    function setupElevation() {
+        byId('skyGuardElevationLookup').addEventListener('click', function () {
+            var note = byId('skyGuardElevationNote');
+            note.className = 'small ms-2 text-body-secondary';
+            note.textContent = 'Looking up…';
+            request('POST', API + 'elevation', {}).then(function (doc) {
+                return saveSetting('show_elevation_ft', doc.elevation_ft).then(function () {
+                    byId('show_elevation_ft').value = doc.elevation_ft;
+                    note.className = 'small ms-2 text-success';
+                    note.textContent = 'Saved: ' + doc.elevation_ft + ' ft. ' + doc.attribution + '.';
+                    refreshStatus();
+                });
+            }).catch(function (error) {
+                note.className = 'small ms-2 text-danger';
+                note.textContent = error.message;
+            });
+        });
+    }
+
     function setupApiKey() {
         var state = byId('skyGuardApiKeyState');
         var field = byId('skyGuardApiKey');
@@ -262,11 +283,16 @@ function skyGuardSettingSaved(key) {
     /* ---- fixtures ---- */
 
     var FIXTURE_NUMBERS = [
-        ['universe', 0, 63999], ['start_channel', 1, 8388608],
         ['dimmer_ch', 1, 512], ['dimmer_off', 0, 255],
         ['shutter_ch', 1, 512], ['shutter_off', 0, 255]
     ];
+    var PATCH_LIMITS = { start_channel: [1, 8388608], universe: [0, 63999] };
+    var MANUAL = '__skyguard_start_channel__';
+    var UNIVERSE = '__skyguard_universe__';
     var fixtureBadges = {};
+    var fixtureChannelText = {};
+    var fixtureChannels = {};
+    var headModels = null;  /* FPP's channel models, loaded once */
 
     function isBlank(value) {
         return value === null || value === undefined || value === '';
@@ -277,13 +303,20 @@ function skyGuardSettingSaved(key) {
         if (!row.name) {
             return false;
         }
-        if (isBlank(row.universe) === isBlank(row.start_channel)) {
+        var patches = ['model', 'start_channel', 'universe'].filter(function (key) {
+            return !isBlank(row[key]);
+        });
+        if (patches.length !== 1) {
             return false;
         }
         if (isBlank(row.dimmer_ch) && isBlank(row.shutter_ch)) {
             return false;
         }
-        return FIXTURE_NUMBERS.every(function (rule) {
+        var ranged = Object.keys(PATCH_LIMITS).every(function (key) {
+            var value = row[key];
+            return isBlank(value) || (Number(value) >= PATCH_LIMITS[key][0] && Number(value) <= PATCH_LIMITS[key][1]);
+        });
+        return ranged && FIXTURE_NUMBERS.every(function (rule) {
             var value = row[rule[0]];
             return isBlank(value) || (Number(value) >= rule[1] && Number(value) <= rule[2]);
         });
@@ -315,7 +348,116 @@ function skyGuardSettingSaved(key) {
     function updateFixtureBadges() {
         Object.keys(fixtureRows).forEach(function (id) {
             setBadge(id, fixtureRows[id]);
+            showChannels(id);
         });
+    }
+
+    /* The FPP channels the running plugin worked out for a head, as on its last status. */
+    function showChannels(id) {
+        var span = fixtureChannelText[id];
+        if (!span) {
+            return;
+        }
+        var channels = fixtureChannels[id] || [];
+        span.textContent = channels.length ? channels.map(function (entry) {
+            return entry.role + ' \u2192 FPP ch ' + entry.channel;
+        }).join(', ') : '';
+    }
+
+    function loadHeadModels() {
+        if (!headModels) {
+            headModels = request('GET', 'api/overlays/models').then(function (models) {
+                return (Array.isArray(models) ? models : []).filter(function (model) {
+                    return model && (model.Type || 'Channel') === 'Channel' && Number(model.StartChannel) >= 1;
+                }).map(function (model) {
+                    return { name: String(model.Name), start: Number(model.StartChannel), count: Number(model.ChannelCount) };
+                }).sort(function (a, b) {
+                    return a.name.localeCompare(b.name);
+                });
+            }).catch(function () {
+                return [];
+            });
+        }
+        return headModels;
+    }
+
+    /* The patch cell: a model from FPP, or a start channel; older rows may have a universe. */
+    function makePatchCell(row, models, saveRow) {
+        var wrap = document.createElement('div');
+        var select = document.createElement('select');
+        select.className = 'form-select form-select-sm skyguard-fixture-patch';
+        select.setAttribute('aria-label', 'Model or start channel');
+        function option(value, label) {
+            var item = document.createElement('option');
+            item.value = value;
+            item.textContent = label;
+            select.appendChild(item);
+        }
+        option('', 'Choose a model\u2026');
+        models.forEach(function (model) {
+            option(model.name, model.name + ' (ch ' + model.start + ')');
+        });
+        if (!isBlank(row.model) && !models.some(function (model) { return model.name === row.model; })) {
+            option(row.model, row.model + ' (not found in FPP)');
+        }
+        option(MANUAL, 'Start channel\u2026');
+        if (!isBlank(row.universe)) {
+            option(UNIVERSE, 'Universe (older setup)\u2026');
+        }
+        select.value = !isBlank(row.model) ? row.model : !isBlank(row.universe) ? UNIVERSE : !isBlank(row.start_channel) ? MANUAL : '';
+
+        var number = document.createElement('input');
+        number.type = 'number';
+        number.className = 'form-control form-control-sm mt-1';
+
+        function numberKey() {
+            return select.value === UNIVERSE ? 'universe' : select.value === MANUAL ? 'start_channel' : null;
+        }
+
+        function showNumber() {
+            var key = numberKey();
+            number.hidden = key === null;
+            if (key) {
+                number.min = PATCH_LIMITS[key][0];
+                number.max = PATCH_LIMITS[key][1];
+                number.placeholder = key === 'universe' ? 'Universe' : 'Start channel';
+                number.setAttribute('aria-label', number.placeholder);
+                number.value = isBlank(row[key]) ? '' : row[key];
+            }
+            return key;
+        }
+        showNumber();
+
+        select.addEventListener('change', function () {
+            row.model = null;
+            if (select.value !== UNIVERSE) {
+                row.universe = null;
+            }
+            if (select.value !== MANUAL) {
+                row.start_channel = null;
+            }
+            if (select.value !== MANUAL && select.value !== UNIVERSE) {
+                row.model = select.value || null;
+            }
+            showNumber();
+            saveRow();
+        });
+        number.addEventListener('change', function () {
+            var key = numberKey();
+            if (key) {
+                row[key] = number.value === '' ? null : number.value;
+                saveRow();
+            }
+        });
+
+        var channels = document.createElement('div');
+        channels.className = 'form-text skyguard-fixture-channels';
+        fixtureChannelText[row.id] = channels;
+
+        wrap.appendChild(select);
+        wrap.appendChild(number);
+        wrap.appendChild(channels);
+        return wrap;
     }
 
     function makeCell(child) {
@@ -333,7 +475,7 @@ function skyGuardSettingSaved(key) {
         return button;
     }
 
-    function addFixtureRow(row) {
+    function addFixtureRow(row, models) {
         fixtureRows[row.id] = row;
         var tr = document.createElement('tr');
 
@@ -366,6 +508,7 @@ function skyGuardSettingSaved(key) {
             saveRow();
         });
         tr.appendChild(makeCell(enabled));
+        tr.appendChild(makeCell(makePatchCell(row, models || [], saveRow)));
 
         FIXTURE_NUMBERS.forEach(function (rule) {
             var input = document.createElement('input');
@@ -386,6 +529,7 @@ function skyGuardSettingSaved(key) {
         fixtureBadges[row.id] = badge;
         tr.appendChild(makeCell(badge));
         setBadge(row.id, row);
+        showChannels(row.id);
 
         var actions = document.createElement('div');
         actions.className = 'd-flex flex-wrap gap-1';
@@ -398,13 +542,16 @@ function skyGuardSettingSaved(key) {
             var copy = Object.assign({}, row);
             delete copy.id;
             copy.name = (row.name || 'Head') + ' copy';
-            request('POST', API + 'fixtures', copy).then(addFixtureRow).then(refreshStatus).catch(showError);
+            Promise.all([request('POST', API + 'fixtures', copy), loadHeadModels()]).then(function (results) {
+                addFixtureRow(results[0], results[1]);
+            }).then(refreshStatus).catch(showError);
         }));
         actions.appendChild(makeButton('Delete', 'btn btn-sm btn-outline-danger', function () {
             request('DELETE', API + 'fixtures/' + encodeURIComponent(row.id)).then(function () {
                 tr.remove();
                 delete fixtureRows[row.id];
                 delete fixtureBadges[row.id];
+                delete fixtureChannelText[row.id];
                 refreshStatus();
             }).catch(showError);
         }));
@@ -415,11 +562,18 @@ function skyGuardSettingSaved(key) {
 
     function setupFixtures() {
         byId('skyGuardFixtureAdd').addEventListener('click', function () {
-            request('POST', API + 'fixtures', { name: 'Head ' + (Object.keys(fixtureRows).length + 1) })
-                .then(addFixtureRow).then(refreshStatus).catch(showError);
+            Promise.all([
+                request('POST', API + 'fixtures', { name: 'Head ' + (Object.keys(fixtureRows).length + 1) }),
+                loadHeadModels()
+            ]).then(function (results) {
+                addFixtureRow(results[0], results[1]);
+            }).then(refreshStatus).catch(showError);
         });
-        return request('GET', API + 'fixtures').then(function (doc) {
-            doc.fixtures.forEach(addFixtureRow);
+        return Promise.all([request('GET', API + 'fixtures'), loadHeadModels()]).then(function (results) {
+            byId('skyGuardNoHeadModels').hidden = results[1].length > 0;
+            results[0].fixtures.forEach(function (row) {
+                addFixtureRow(row, results[1]);
+            });
         }).catch(showError);
     }
 
@@ -873,6 +1027,7 @@ function skyGuardSettingSaved(key) {
 
         updateVisibility();
         setupLocation();
+        setupElevation();
         var showKeyState = setupApiKey();
         setupFixtures();
         setupPlaceholders();

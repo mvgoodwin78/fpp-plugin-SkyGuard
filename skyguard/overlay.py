@@ -18,7 +18,7 @@ import threading
 from dataclasses import dataclass
 
 from .fpp_api import FppError
-from .notifier import LOGGER_NAME
+from .notifier import LOGGER_NAME, MODEL_HELD
 
 HOLD_RESEND_S = 2.0
 RESOLVE_INTERVAL_S = 30.0
@@ -230,16 +230,23 @@ class ResolvedFixture:
     id: str = ""
 
 
-def universe_entries(doc):
-    """Active universes on enabled outputs, as (first id, last id, start channel, channel count)."""
+def universe_entries(doc, include_off=False):
+    """Active universes on enabled outputs, as (first id, last id, start channel, channel count).
+
+    include_off also lists switched-off outputs and universes, which still say where a
+    universe's channels are; migrate.py uses that to turn universe rows into start channels."""
     entries = []
     outputs = doc.get("channelOutputs") if isinstance(doc, dict) else None
     for output in outputs if isinstance(outputs, list) else []:
-        if not isinstance(output, dict) or output.get("enabled") not in (1, "1", True):
+        if not isinstance(output, dict):
+            continue
+        if not include_off and output.get("enabled") not in (1, "1", True):
             continue
         universes = output.get("universes")
         for universe in universes if isinstance(universes, list) else []:
-            if not isinstance(universe, dict) or universe.get("active", 1) in (0, "0", False):
+            if not isinstance(universe, dict):
+                continue
+            if not include_off and universe.get("active", 1) in (0, "0", False):
                 continue
             try:
                 first = int(universe["id"])
@@ -263,9 +270,43 @@ def _universe_base(universe, entries):
     return start + (universe - first) * count, count
 
 
-def _fixture_channels(fixture, entries):
-    """Return (list of (channel, value, role), problem)."""
-    if fixture.start_channel is not None:
+MODEL_MISSING = "Model not found in FPP"
+
+
+def model_entries(models):
+    """FPP's channel-based models, as {name: (start channel, channel count)}.
+
+    StartChannel is 1-based for these. Frame-buffer models report 0 and aren't heads."""
+    entries = {}
+    for model in models if isinstance(models, list) else []:
+        if not isinstance(model, dict) or model.get("Type", "Channel") != "Channel":
+            continue
+        try:
+            name = str(model["Name"])
+            start = int(model["StartChannel"])
+            count = int(model.get("ChannelCount", 512))
+        except (KeyError, TypeError, ValueError):
+            continue
+        if start >= 1 and count >= 1:
+            entries[name] = (start, count)
+    return entries
+
+
+def _fixture_channels(fixture, entries, models=None, last_known=None):
+    """Return (list of (channel, value, role), problem).
+
+    A head set by model follows the model if xLights re-patches it. If the model vanishes,
+    the channels it last had stay held (with a problem shown), as the head is still there."""
+    problem = None
+    if fixture.model is not None:
+        found = (models or {}).get(fixture.model)
+        if found is None:
+            found = (last_known or {}).get(fixture.model)
+            if found is None:
+                return [], MODEL_MISSING
+            problem = MODEL_HELD
+        base, limit = found
+    elif fixture.start_channel is not None:
         base, limit = fixture.start_channel, 512
     else:
         found = _universe_base(fixture.universe, entries)
@@ -274,7 +315,6 @@ def _fixture_channels(fixture, entries):
         base, limit = found
 
     channels = []
-    problem = None
     for role, dmx, value in (
         ("dimmer", fixture.dimmer_ch, fixture.dimmer_off),
         ("shutter", fixture.shutter_ch, fixture.shutter_off),
@@ -290,9 +330,10 @@ def _fixture_channels(fixture, entries):
     return channels, problem
 
 
-def resolve_fixtures(fixtures, universe_doc):
+def resolve_fixtures(fixtures, universe_doc, models_doc=None, last_known=None):
     """Turn fixture rows into FPP channels. Incomplete and disabled rows resolve to nothing."""
     entries = universe_entries(universe_doc)
+    models = model_entries(models_doc)
     claimed = {}
     resolved = []
     for fixture in fixtures:
@@ -302,7 +343,7 @@ def resolve_fixtures(fixtures, universe_doc):
         if not fixture.enabled:
             resolved.append(ResolvedFixture(fixture.name, True, None, (), fixture.id))
             continue
-        channels, problem = _fixture_channels(fixture, entries)
+        channels, problem = _fixture_channels(fixture, entries, models, last_known)
         kept = []
         for channel, value, role in channels:
             if claimed.get(channel, value) != value:
@@ -326,10 +367,12 @@ class ChannelResolver:
     resolve() never blocks. refresh() does both, for callers with no thread of their own.
     """
 
-    def __init__(self, api, notifier, clock):
+    def __init__(self, api, notifier, clock, known_path=None):
         self._api = api
         self._notifier = notifier
         self._clock = clock
+        self._known_path = known_path
+        self._last_known = self._load_known()
         self._lock = threading.Lock()
         self._doc = None
         self._have_doc = False
@@ -356,7 +399,7 @@ class ChannelResolver:
                 return False
             self._last_read = now
         try:
-            doc = self._api.get_universe_outputs()
+            doc = (self._api.get_universe_outputs(), self._api.get_models())
         except FppError as error:
             with self._lock:
                 # Keep resolving from the last good copy; channels don't move while FPP is away.
@@ -382,9 +425,42 @@ class ChannelResolver:
             return self.resolved
         self._fixtures = fixtures
         self._resolved_version = version
-        self.resolved = resolve_fixtures(fixtures, doc)
+        universes, models = doc if doc is not None else (None, None)
+        self.resolved = resolve_fixtures(fixtures, universes, models, self._last_known)
+        self._remember_models(fixtures, models)
         self._report_problems()
         return self.resolved
+
+    # Where each head's model last was, so a model deleted or renamed in FPP doesn't
+    # release a head that is still plugged in. Kept on disk for a restart in between.
+
+    def _load_known(self):
+        if not self._known_path:
+            return {}
+        try:
+            with open(self._known_path, encoding="utf-8") as handle:
+                doc = json.load(handle)
+            return {str(k): (int(v[0]), int(v[1])) for k, v in doc.items()}
+        except FileNotFoundError:
+            return {}
+        except (OSError, ValueError, TypeError, IndexError, AttributeError):
+            _logger.warning("The saved model channels are unreadable; starting without them.")
+            return {}
+
+    def _remember_models(self, fixtures, models_doc):
+        found = model_entries(models_doc)
+        known = dict(self._last_known)
+        for fixture in fixtures:
+            if fixture.model is not None and fixture.model in found:
+                known[fixture.model] = found[fixture.model]
+        if known == self._last_known:
+            return
+        self._last_known = known
+        if self._known_path:
+            try:
+                atomic_write_json(self._known_path, {k: list(v) for k, v in known.items()})
+            except OSError as error:
+                _logger.warning("Could not save the model channels: %s", error)
 
     def refresh(self, fixtures):
         self.read_outputs()

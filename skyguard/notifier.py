@@ -14,6 +14,8 @@ from dataclasses import dataclass, field
 LOGGER_NAME = "skyguard"
 
 _FIXTURE_INVALID = "fixture_invalid"
+# A head whose FPP model has gone: its last channels are still held. overlay.py uses this.
+MODEL_HELD = "Model not found in FPP; still holding its last channels"
 
 # Warning key -> the message shown in status data and the header indicator.
 _WARNING_MESSAGES = {
@@ -126,12 +128,13 @@ class Notifier:
     def _build(name, details):
         if name == _FIXTURE_INVALID:
             fixture = details.get("fixture", "")
-            return Event(
-                name,
-                details,
-                raises=_fixture_key(details),
-                message=f"Fixture '{fixture}' can't be resolved, so it won't black out.",
-            )
+            message = f"Fixture '{fixture}' can't be resolved, so it won't black out."
+            if details.get("problem") == MODEL_HELD:
+                message = (
+                    f"Fixture '{fixture}': its model is no longer in FPP, so SkyGuard keeps "
+                    "holding the channels it last had. Pick the model again."
+                )
+            return Event(name, details, raises=_fixture_key(details), message=message)
         if name == "fixture_resolved":
             return Event(name, details, clears=(_fixture_key(details),))
         if name in _RAISES:

@@ -46,6 +46,7 @@ class Paths:
     fixtures_file: str
     private_file: str
     ledger_file: str
+    model_channels_file: str
     status_file: str
     commands_dir: str
     supervisor_pid_file: str
@@ -65,6 +66,7 @@ class Paths:
             fixtures_file=os.path.join(data, "fixtures.json"),
             private_file=os.path.join(data, "private.json"),
             ledger_file=os.path.join(data, "active_ranges.json"),
+            model_channels_file=os.path.join(data, "model_channels.json"),
             status_file=os.path.join(data, "status.json"),
             commands_dir=os.path.join(data, "commands"),
             supervisor_pid_file=os.path.join(data, "supervisor.pid"),
@@ -97,6 +99,7 @@ class Settings:
     radius_unit: str = "mi"
     alt_floor_ft: float = 0.0
     alt_ceiling_ft: float = 10000.0
+    show_elevation_ft: float = 0.0  # the show's height above sea level; the limits are above the show
     count_no_position: bool = True
     ignore_ground: bool = False
     ground_speed_limit_kt: float = 40.0
@@ -153,7 +156,8 @@ class Fixture:
     name: str
     id: str = ""
     enabled: bool = True
-    universe: int | None = None
+    model: str | None = None  # an FPP model name; its start channel is looked up, and followed
+    universe: int | None = None  # older rows only; the page offers a model or a start channel
     start_channel: int | None = None
     dimmer_ch: int | None = None
     dimmer_off: int = 0
@@ -321,6 +325,7 @@ def load_settings(raw, private=None):
         radius_unit=read.choice("radius_unit", RADIUS_UNITS),
         alt_floor_ft=read.number("alt_floor_ft"),
         alt_ceiling_ft=read.number("alt_ceiling_ft"),
+        show_elevation_ft=read.number("show_elevation_ft", -1500, 15000),
         count_no_position=read.boolean("count_no_position"),
         ignore_ground=read.boolean("ignore_ground"),
         ground_speed_limit_kt=read.number("ground_speed_limit_kt", 5, 100),
@@ -396,6 +401,14 @@ def parse_fixture(row):
         enabled = True
         problems.append("enabled is not true or false")
 
+    model = row.get("model")
+    if model is None or (isinstance(model, str) and not model.strip()):
+        model = None
+    elif not isinstance(model, str) or len(model) > 128 or any(ord(c) < 32 for c in model):
+        problems.append("model is not a valid model name")
+        model = None
+    else:
+        model = model.strip()
     universe = _optional_int(row, "universe", 0, None, problems)
     start_channel = _optional_int(row, "start_channel", 1, None, problems)
     dimmer_ch = _optional_int(row, "dimmer_ch", 1, 512, problems)
@@ -403,10 +416,11 @@ def parse_fixture(row):
     dimmer_off = _optional_int(row, "dimmer_off", 0, 255, problems)
     shutter_off = _optional_int(row, "shutter_off", 0, 255, problems)
 
-    if universe is not None and start_channel is not None:
-        problems.append("set universe or start_channel, not both")
-    elif universe is None and start_channel is None and not problems:
-        problems.append("universe or start_channel is required")
+    patches = sum(value is not None for value in (model, universe, start_channel))
+    if patches > 1:
+        problems.append("set one of model, start_channel or universe")
+    elif patches == 0 and not problems:
+        problems.append("a model or start_channel is required")
     if dimmer_ch is None and shutter_ch is None and not problems:
         problems.append("dimmer_ch or shutter_ch is required")
 
@@ -414,6 +428,7 @@ def parse_fixture(row):
         name=name,
         id=str(row.get("id") or ""),
         enabled=enabled,
+        model=model,
         universe=universe,
         start_channel=start_channel,
         dimmer_ch=dimmer_ch,

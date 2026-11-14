@@ -211,7 +211,7 @@ The zone is one circle: a center lat/lon plus a radius, filtered by an altitude 
 For each aircraft in the active feed's list:
 
 1. **Distance:** great-circle (haversine) distance from center to `lat/lon`. In zone if distance ≤ `radius`.
-2. **Altitude:** in zone if `alt_floor_ft` ≤ altitude ≤ `alt_ceiling_ft`. An aircraft reporting `ground` counts as 0 ft. Default floor 0 so ground traffic counts. Feeds report pressure altitude, which on a high-pressure day or near a low airport can be below 0 for an aircraft on approach, so a floor of 0 or less means no floor at all. An aircraft inside the radius that reports no altitude counts as in zone (fail-safe).
+2. **Altitude:** in zone if `alt_floor_ft` ≤ height above the show ≤ `alt_ceiling_ft`, where height = reported altitude − `show_elevation_ft` (feeds report height above sea level). An aircraft reporting `ground` counts as 0 ft above the show. Default floor 0 so ground traffic counts. Feeds report pressure altitude, which on a high-pressure day or near a low airport can be below 0 for an aircraft on approach, so a floor of 0 or less means no floor at all. An aircraft inside the radius that reports no altitude counts as in zone (fail-safe).
 3. **No position** (altitude but no lat/lon): governed by the `count_no_position` toggle. ON = treat as in zone if its altitude passes the altitude filter; OFF = skip it but log it. Default ON (fail-safe). The owner will review this default against real receiver traffic during acceptance, because a receiver can hear position-less aircraft far outside the radius.
 4. An aircraft with neither position nor altitude tells us nothing and is skipped, whatever the toggle says.
 5. Stale positions are not discarded; the last known position is used.
@@ -259,14 +259,21 @@ Each moving head is entered individually; the plugin overrides only that head's 
 | --- | --- | --- |
 | `name` | string | User label, e.g. "Roof head left" |
 | `enabled` | bool | Include this head in blackouts |
-| `universe` | int, optional | Universe the head is on |
-| `start_channel` | int ≥ 1, optional | Absolute FPP channel of DMX channel 1 on this head's output, for outputs with no universe number (USB DMX, DDP, some capes) |
-| `dimmer_ch` | int 1–512, optional | DMX channel of the dimmer within that universe (absolute address, not offset) |
+| `model` | string, optional | Name of the head's FPP model (Pixel Overlay Models, which xLights uploads through FPP Connect). Its `StartChannel` is the head's channel 1 |
+| `start_channel` | int ≥ 1, optional | FPP channel the head's DMX channel 1 counts from: the head's start channel from xLights, or for a row converted from a universe, that universe's first channel |
+| `universe` | int, optional | Older rows only. The page no longer offers it, and install turns these rows into `start_channel` where FPP's output configuration has the universe |
+| `dimmer_ch` | int 1–512, optional | The dimmer's channel, counted from the head's channel 1 (the fixture's DMX chart), or for a universe row its address in the universe |
 | `dimmer_off` | int 0–255, default 0 | Value forced during blackout |
-| `shutter_ch` | int 1–512, optional | DMX channel of the shutter within that universe |
+| `shutter_ch` | int 1–512, optional | The shutter's channel, counted the same way |
 | `shutter_off` | int 0–255, default 0 | Value forced during blackout |
 
-Exactly one of `universe` or `start_channel` is required, and at least one of `dimmer_ch` or `shutter_ch`. A row that doesn't meet this is incomplete and ignored. A head on a 16-bit dimmer can list both bytes later; phase 1 supports one channel each.
+Exactly one of `model`, `start_channel` or `universe` is required, and at least one of `dimmer_ch` or `shutter_ch`. A row that doesn't meet this is incomplete and ignored. A head on a 16-bit dimmer can list both bytes later; phase 1 supports one channel each. Owner decision (Nov 14, 2026): heads are picked by model or start channel, as in the AirDefender plugin, and SkyGuard keeps forcing both the dimmer and the shutter.
+
+### Model to FPP channel
+
+`GET /api/overlays/models` lists FPP's models. Only `Type` `Channel` models with a `StartChannel` of 1 or more are heads (`StartChannel` is 1-based for these; frame-buffer models report 0). `fpp_channel = StartChannel + dmx_channel − 1`, and a channel past the model's `ChannelCount` is invalid. It is read with the output configuration on the FPP watch thread, so a head re-patched in xLights and uploaded again is followed within 30 s.
+
+If a model disappears (renamed or deleted), the head is still plugged in, so SkyGuard keeps holding the channels the model last had and flags the row "Model not found in FPP; still holding its last channels". The last channels of each model in use are kept in `plugindata/fpp-plugin-SkyGuard/model_channels.json`, so this survives a restart. A model never seen has nothing to hold and shows "Model not found in FPP".
 
 ### Universe to FPP channel
 
@@ -464,7 +471,8 @@ Every setting below lives in `config/plugin.fpp-plugin-SkyGuard` except the fixt
 | `radius` | none | User must enter it. Used with online data |
 | `radius_receiver` | none | User must enter it. Used while a receiver is the active feed |
 | `radius_unit` | mi | `mi`, `nm`, `km`. Applies to both |
-| `alt_floor_ft` / `alt_ceiling_ft` | 0 / 10000 | Inclusive; a floor of 0 or less means no floor |
+| `alt_floor_ft` / `alt_ceiling_ft` | 0 / 10000 | Heights above the show, inclusive; a floor of 0 or less means no floor |
+| `show_elevation_ft` | 0 | The show's ground elevation above sea level, −1500 to 15000. Look it up sends the saved center point to api.open-meteo.com (Copernicus DEM, 90 m) once, only when pressed. 0 measures from sea level |
 | `count_no_position` | true | Aircraft with altitude but no position count as in zone |
 | `ignore_ground` | false | Skip aircraft on the ground; see Ignoring ground traffic |
 | `ground_speed_limit_kt` | 40 | With `ignore_ground` on, aircraft reporting `ground` are skipped below this speed or with no speed. 5–100 |
@@ -498,6 +506,8 @@ A `privacy` block is required for listing; generate it with the [Privacy disclos
 | Stored location | Home latitude/longitude stored locally in `plugindata/` and returned by the status endpoint to anyone who can reach FPP |
 | Online flight feed | Center point and radius sent to the chosen provider on every online poll: every 1–2 s during a show, and between shows only if the user turns that on; never while disabled or with no center set. Not alwaysOn |
 | Geocoding | Typed address sent to the geocoding service, only when the user presses lookup |
+| Elevation | The saved center point sent to `api.open-meteo.com`, only when the user presses Look it up. Not alwaysOn |
+| Local receiver on this box | Read from the decoder's files under `/run`; no network request |
 | Map tiles | The viewer's browser loads map tiles from `tile.openstreetmap.org` while the status page or Location & Zone tab is open. `fpp_install.sh` runs `ManageApacheContentPolicy.sh add img-src`, `fpp_uninstall.sh` removes it, and the `sends` entry says "your browser's address and the map area around your show", because the tiles requested reveal roughly where the show is |
 | Local receiver | Requests to a user-entered address on the LAN |
 | API key | Optional third-party key stored locally |
@@ -560,11 +570,11 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 | --- | --- |
 | Data Source | Source mode; receiver URL and optional 978 URL with a Test button (shows aircraft seen or the error); online provider dropdown, masked API key field, Test button |
 | Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); a note on finding coordinates in Google Maps; display-only map of the center point and radius circle (no draggable pin); online radius and receiver radius as required entries with no pre-filled value, shown according to the data sources in use, and their unit; the lag notice when online data is selected; altitude floor and ceiling; "Ignore aircraft on the ground" switch |
-| Fixtures | Table, one row per head: name, universe or start channel, dimmer ch, dimmer off, shutter ch, shutter off, enabled. Add, duplicate, delete. Per-row Test button blacks out that head only for 3 s |
+| Fixtures | Table, one row per head: name, model (from FPP's model list) or start channel, dimmer ch, dimmer off, shutter ch, shutter off, enabled. Under the model, the FPP channels the daemon worked out, from status. If FPP has no head models, a note says how to upload them from xLights with FPP Connect (Models column set to All). Add, duplicate, delete. Per-row Test button blacks out that head only for 3 s |
 | Matrix Message | Enable switch; panel picker from the FPP overlay model list; message field with click-to-insert placeholder buttons; live preview with sample values; Test on panels and Stop buttons, with a live view of the first ticked panel's real pixels during the test, also shown when the page is opened during one; no-data message; color, font, size, speed |
 | Advanced (collapsed) | Poll interval, online idle interval, health interval, fail count, max data age, release delay, count-no-position toggle, ground speed limit, units |
 
-**Fixture row validation:** a row takes effect only when its required fields are filled and valid. Until then it shows an "Incomplete" badge and the trigger engine ignores it. A row whose universe can't be resolved shows "Universe not found".
+**Fixture row validation:** a row takes effect only when its required fields are filled and valid. Until then it shows an "Incomplete" badge and the trigger engine ignores it. A row whose model or universe can't be resolved shows why ("Model not found in FPP", "Universe not found").
 
 ### Status page (Status → SkyGuard)
 

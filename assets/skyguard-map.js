@@ -33,6 +33,10 @@
             altitude = 'Ground';
         } else if (typeof aircraft.alt_ft === 'number') {
             altitude = metric ? formatNumber(aircraft.alt_ft * FEET_TO_METERS) + ' m' : formatNumber(aircraft.alt_ft) + ' ft';
+            /* With a show elevation set, also the height above the show, which the limits use. */
+            if (typeof aircraft.height_ft === 'number' && aircraft.height_ft !== aircraft.alt_ft) {
+                altitude += ' (' + (metric ? formatNumber(aircraft.height_ft * FEET_TO_METERS) + ' m' : formatNumber(aircraft.height_ft) + ' ft') + ' above show)';
+            }
         }
         var speed = 'Unknown';
         if (typeof aircraft.gs_kt === 'number') {
