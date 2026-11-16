@@ -169,12 +169,42 @@ function skyGuardSettingSaved(key) {
             result.textContent = 'Testing…';
             request('POST', path, body).then(function (doc) {
                 result.className = 'small ms-2 text-success';
-                result.textContent = 'Working: ' + doc.aircraft + ' aircraft seen' +
-                    (doc.decoders ? ', from ' + doc.decoders.join(' and ') : '') + '.';
+                if (Array.isArray(doc.receivers)) {
+                    showReceivers(result, doc.receivers);
+                    return;
+                }
+                result.textContent = 'Working: ' + doc.aircraft + ' aircraft seen.';
             }).catch(function (error) {
                 result.className = 'small ms-2 text-danger';
                 result.textContent = error.message;
             });
+        });
+    }
+
+    /* One line per band from the decoder-on-this-box test. */
+    function describeReceiver(entry) {
+        var label = entry.band + ' MHz';
+        if (entry.state === 'missing') {
+            return { text: label + ': no decoder found.', warn: entry.band === '1090' };
+        }
+        var head = label + ' (' + entry.decoder + '): ';
+        if (entry.state === 'stale') {
+            return { text: head + 'data stopped updating ' + Math.round(entry.age_s) + ' s ago. Is it running?', warn: true };
+        }
+        if (entry.state === 'behind') {
+            return { text: head + entry.aircraft + ' aircraft, but more than 5 s behind 1090, so not used.', warn: true };
+        }
+        return { text: head + entry.aircraft + ' aircraft, updated ' + entry.age_s + ' s ago.', warn: false };
+    }
+
+    function showReceivers(result, receivers) {
+        result.textContent = 'Working:';
+        receivers.forEach(function (entry) {
+            var line = describeReceiver(entry);
+            var row = document.createElement('span');
+            row.className = 'd-block ' + (line.warn ? 'text-warning-emphasis' : 'text-success');
+            row.textContent = line.text;
+            result.appendChild(row);
         });
     }
 

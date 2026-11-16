@@ -162,8 +162,9 @@ class AdapterTests(Files):
 
     def test_the_paths_match_the_settings_page_test(self):
         php = read("api.php")
-        listed = re.findall(r"array\('[^']+', '(/run/[^']+)'\)", php)
-        self.assertEqual(listed, list(LOCAL_1090_FILES + LOCAL_978_FILES))
+        listed = re.findall(r"array\('[^']+', '(1090|978)', '(/run/[^']+)'\)", php)
+        expected = [("1090", p) for p in LOCAL_1090_FILES] + [("978", p) for p in LOCAL_978_FILES]
+        self.assertEqual(listed, expected)
 
 
 class FeedManagerTests(Files):
@@ -211,6 +212,33 @@ class FeedManagerTests(Files):
             self.time += 1.0
             manager.poll_once()
         self.assertFalse(manager.data_fresh())
+
+    def test_status_lists_each_receiver_with_its_count(self):
+        manager = self.manager()
+        self.write("a", {"now": 1000.0, "aircraft": [PLANE, {**PLANE, "hex": "a2"}]})
+        self.write("u", {"now": 1000.0, "aircraft": [UAT]})
+        self.time = 1.0
+        manager.poll_once()
+        self.assertEqual(manager.state().receivers, (("1090", 2, "ok"), ("978", 1, "ok")))
+        self.assertEqual(len(manager.state().aircraft), 3)
+
+    def test_status_shows_a_missing_or_late_978(self):
+        manager = self.manager()
+        self.write("a", {"now": 1000.0, "aircraft": [PLANE]})
+        self.time = 1.0
+        manager.poll_once()
+        self.assertEqual(manager.state().receivers, (("1090", 1, "ok"), ("978", None, "missing")))
+        self.write("a", {"now": 1010.0, "aircraft": [PLANE]})
+        self.write("u", {"now": 1000.0, "aircraft": [UAT]})
+        self.time = 2.0
+        manager.poll_once()
+        self.assertEqual(manager.state().receivers, (("1090", 1, "ok"), ("978", 1, "behind")))
+
+    def test_a_failed_poll_lists_no_receivers(self):
+        manager = self.manager()
+        self.time = 1.0
+        manager.poll_once()
+        self.assertEqual(manager.state().receivers, ())
 
     def test_both_mode_health_checks_read_the_file(self):
         manager = self.manager(

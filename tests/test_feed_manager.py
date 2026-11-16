@@ -633,6 +633,21 @@ class SecondDecoderTests(unittest.TestCase):
         self.h.run_for(1)
         self.assertEqual(self.h.hexes(), ["a1", "b2"])
 
+    def test_status_lists_both_receivers(self):
+        self.h.manager.poll_second_once()
+        self.h.run_for(1)
+        self.assertEqual(self.h.manager.state().receivers, (("1090", 1, "ok"), ("978", 1, "ok")))
+
+    def test_status_shows_978_with_no_data_when_it_is_down(self):
+        self.h.net.errors[RX978] = FeedError("down")
+        self.h.run_for(3)
+        self.assertEqual(self.h.manager.state().receivers, (("1090", 1, "ok"), ("978", None, "missing")))
+
+    def test_a_single_receiver_lists_one(self):
+        h = Harness(source_mode="receiver")
+        h.run_for(2)
+        self.assertEqual(h.manager.state().receivers, (("1090", 1, "ok"),))
+
     def test_primary_data_still_flows_when_978_is_down(self):
         self.h.net.errors[RX978] = FeedError("down")
         self.h.run_for(5)

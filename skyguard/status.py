@@ -108,6 +108,9 @@ def build_status(
         "source_mode": settings.source_mode,
         "active_feed": feed_state.active_feed,
         "receiver_ok": feed_state.receiver_ok,
+        "receivers": [
+            {"band": band, "aircraft": count, "state": state} for band, count, state in feed_state.receivers
+        ],
         "last_data_age_s": None if data_age_s is None else round(data_age_s, 1),
         "aircraft_in_zone": len(zone.in_zone) if zone is not None else 0,
         "center": {"lat": settings.center_lat, "lon": settings.center_lon},

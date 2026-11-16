@@ -148,6 +148,16 @@
         box.replaceChildren();
         healthRow(box, 'Active data feed', FEEDS[status.active_feed] || 'None');
         healthRow(box, 'Receiver', receiver);
+        (status.receivers || []).forEach(function (entry) {
+            var value = 'No data';
+            if (typeof entry.aircraft === 'number') {
+                value = entry.aircraft + ' aircraft';
+                if (entry.state === 'behind') {
+                    value += ' (more than 5 s behind 1090, not used)';
+                }
+            }
+            healthRow(box, entry.band + ' MHz receiver', value);
+        });
         if (status.cross_check_active) {
             healthRow(box, 'Online check', 'On, for aircraft the receiver misses');
         }

@@ -55,6 +55,7 @@ class FeedState:
     last_poll_failed: bool
     cross_check: tuple = ()  # the online feed's aircraft, while it's checking the receiver
     cross_check_active: bool = False
+    receivers: tuple = ()  # (band, aircraft count or None, state) per receiver, while it is active
 
 
 class FeedManager:
@@ -98,6 +99,7 @@ class FeedManager:
     # Configuration helpers ------------------------------------------------------
 
     def _reset_receiver_tracking(self):
+        self._bands = ()
         self._receiver_healthy = True
         self._health_failures = 0
         self._last_health = None
@@ -331,12 +333,27 @@ class FeedManager:
             _logger.info("%s feed is delivering data again", self._active)
             self._poll_error = None
         if self._active == FEED_RECEIVER:
+            self._bands = self._receiver_bands(now, snapshot)
             snapshot = self._with_second_feed(now, snapshot)
         self._aircraft = snapshot.aircraft
         self._skipped = snapshot.skipped
 
+    def _receiver_bands(self, now, snapshot):
+        """Each receiver's aircraft count, for the status page. Never decides a blackout."""
+        if snapshot.bands:
+            return snapshot.bands
+        band = "1090" if self._settings.receiver_url else "978"
+        bands = ((band, len(snapshot.aircraft), "ok"),)
+        if not self._second_url:
+            return bands
+        second = self._second_snapshot
+        if second is None or now - self._second_at > max(self._settings.max_data_age_s, MIN_978_DATA_AGE_S):
+            return bands + (("978", None, "missing"),)
+        return bands + (("978", len(second.aircraft), "ok"),)
+
     def _poll_failed(self, error):
         self._last_poll_failed = True
+        self._bands = ()
         self._current_feed_failing = True
         if self._active == FEED_ONLINE and isinstance(error, FeedHttpError) and 400 <= error.status < 500:
             self._online_4xx_count += 1
@@ -571,6 +588,7 @@ class FeedManager:
                 last_poll_failed=self._last_poll_failed,
                 cross_check=self._check_aircraft if self._check_wanted and self._check_fresh(self._clock()) else (),
                 cross_check_active=self._check_wanted,
+                receivers=self._bands if self._active == FEED_RECEIVER and not self._last_poll_failed else (),
             )
 
     # Threads --------------------------------------------------------------------

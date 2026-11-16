@@ -45,6 +45,9 @@ class FeedSnapshot:
     aircraft: tuple
     now_s: float  # when the feed generated this data, in seconds since the epoch
     skipped: int = 0  # entries dropped because they had no usable hex
+    # Per receiver, for the status page: (band, aircraft count or None, state), where state
+    # is "ok", "behind" (978 data too old to merge) or "missing". Empty when not known.
+    bands: tuple = ()
 
 
 def number(value):

@@ -115,11 +115,22 @@ class LocalReceiverAdapter:
             uat = None  # 978 is extra; a bad 978 file mustn't hide the 1090 data
         if main is None and uat is None:
             raise FeedError("no decoder found on this box (readsb, dump1090-fa or dump978-fa)")
+        behind = main is not None and uat is not None and uat.now_s < main.now_s - LOCAL_978_MAX_LAG_S
+        bands = (_band("1090", main), _band("978", uat, behind))
         if main is None:
-            return uat
-        if uat is None or uat.now_s < main.now_s - LOCAL_978_MAX_LAG_S:
-            return main
-        return merge_snapshots(main, uat)
+            result = uat
+        elif uat is None or behind:
+            result = main
+        else:
+            result = merge_snapshots(main, uat)
+        return replace(result, bands=bands)
+
+
+def _band(band, snapshot, behind=False):
+    """One receiver's entry for FeedSnapshot.bands."""
+    if snapshot is None:
+        return (band, None, "missing")
+    return (band, len(snapshot.aircraft), "behind" if behind else "ok")
 
 
 def _position_rank(record):

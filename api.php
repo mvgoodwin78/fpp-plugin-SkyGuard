@@ -425,25 +425,25 @@ function fppPluginSkyGuardTestReceiver() {
     return json(array('status' => 'OK', 'aircraft' => count($doc['aircraft'])));
 }
 
-// The files a decoder on this box writes. Keep in step with skyguard/feeds/receiver.py.
+// The files a decoder on this box writes, as (name, band, path). Keep in step with
+// skyguard/feeds/receiver.py.
 function fppPluginSkyGuardLocalDecoderFiles() {
     return array(
-        array('readsb', '/run/readsb/aircraft.json'),
-        array('dump1090-fa', '/run/dump1090-fa/aircraft.json'),
-        array('dump1090', '/run/dump1090/aircraft.json'),
-        array('dump1090-mutability', '/run/dump1090-mutability/aircraft.json'),
-        array('dump978-fa', '/run/skyaware978/aircraft.json'),
-        array('dump978-fa', '/run/dump978-fa/aircraft.json'),
+        array('readsb', '1090', '/run/readsb/aircraft.json'),
+        array('dump1090-fa', '1090', '/run/dump1090-fa/aircraft.json'),
+        array('dump1090', '1090', '/run/dump1090/aircraft.json'),
+        array('dump1090-mutability', '1090', '/run/dump1090-mutability/aircraft.json'),
+        array('dump978-fa', '978', '/run/skyaware978/aircraft.json'),
+        array('dump978-fa', '978', '/run/dump978-fa/aircraft.json'),
     );
 }
 
-// With {"local": true}: looks for a decoder on this box, at fixed paths only.
+// With {"local": true}: looks for a decoder on this box, at fixed paths only, and reports
+// each band on its own. Like the daemon, the newest file of each band is the one used.
 function fppPluginSkyGuardTestLocalReceiver() {
-    $found = array();
-    $stale = array();
-    $total = 0;
+    $bands = array('1090' => null, '978' => null);
     foreach (fppPluginSkyGuardLocalDecoderFiles() as $entry) {
-        list($name, $path) = $entry;
+        list($name, $band, $path) = $entry;
         if (!is_file($path) || is_link($path)) {
             continue;
         }
@@ -455,18 +455,42 @@ function fppPluginSkyGuardTestLocalReceiver() {
         if ($now > 1e11) {
             $now /= 1000.0;
         }
-        if (abs(time() - $now) > 10) {
-            $stale[] = $name;
+        if ($bands[$band] !== null && $bands[$band]['now'] >= $now) {
             continue;
         }
-        $found[] = $name;
-        $total += count($doc['aircraft']);
+        $bands[$band] = array('now' => $now, 'decoder' => $name, 'aircraft' => count($doc['aircraft']));
     }
-    if (count($found) > 0) {
-        return json(array('status' => 'OK', 'aircraft' => $total, 'decoders' => array_values(array_unique($found))));
+    $receivers = array();
+    $total = 0;
+    $working = 0;
+    $stale = array();
+    foreach ($bands as $band => $found) {
+        if ($found === null) {
+            $receivers[] = array('band' => $band, 'state' => 'missing');
+            continue;
+        }
+        $age = max(0, time() - $found['now']);
+        $state = 'ok';
+        if ($age > 10) {
+            $state = 'stale';
+            $stale[] = $found['decoder'];
+        } elseif ($band === '978' && $bands['1090'] !== null && $bands['1090']['now'] - $found['now'] > 5) {
+            $state = 'behind';
+        }
+        if ($state !== 'stale') {
+            $working++;
+            if ($state === 'ok') {
+                $total += $found['aircraft'];
+            }
+        }
+        $receivers[] = array('band' => $band, 'state' => $state, 'decoder' => $found['decoder'],
+            'aircraft' => $found['aircraft'], 'age_s' => round($age, 1));
+    }
+    if ($working > 0) {
+        return json(array('status' => 'OK', 'aircraft' => $total, 'receivers' => $receivers));
     }
     if (count($stale) > 0) {
-        return fppPluginSkyGuardError(502, 'Found ' . implode(' and ', array_unique($stale)) . ' on this box, but its data has stopped updating. Is the decoder running?');
+        return fppPluginSkyGuardError(502, 'Found ' . implode(' and ', $stale) . ' on this box, but its data has stopped updating. Is the decoder running?');
     }
     return fppPluginSkyGuardError(502, 'No decoder found on this box. SkyGuard reads the aircraft.json that readsb, dump1090-fa or dump978-fa writes under /run. If yours runs here, check that it writes JSON (readsb: --write-json /run/readsb).');
 }

@@ -182,7 +182,7 @@
 		"/api/plugin/fpp-plugin-SkyGuard/test-receiver": {
 			"post": {
 				"summary": "Check a receiver address",
-				"description": "Runs from FPP. Reports an aircraft count or an error, and never passes on what the address sent back. With {\"local\": true} instead of a url, checks for a decoder on this box (fixed files under /run).",
+				"description": "Runs from FPP. Reports an aircraft count or an error, and never passes on what the address sent back. With {\"local\": true} instead of a url, checks for a decoder on this box (fixed files under /run) and adds receivers: one entry per band (1090, 978) with state ok, behind, stale or missing, and the decoder, aircraft count and data age.",
 				"requestBody": {
 					"required": true,
 					"description": "url",
