@@ -439,6 +439,7 @@ function fppPluginSkyGuardDecoderPages() {
         ),
         '978' => array(
             '/skyaware978/data/aircraft.json',
+            '/skyaware/data-978/aircraft.json',
             '/dump978-fa/data/aircraft.json',
         ),
     );
