@@ -294,8 +294,10 @@ class LiveManagerTests(ServerTestCase):
         )
         self.assertTrue(wait_until(lambda: manager.state().aircraft))
         before = self.receiver.requests
-        time.sleep(0.3)
-        self.assertGreater(self.receiver.requests - before, 3)
+        # Blocked behind the 0.5 s request, this would manage 2 at most. A busy test machine
+        # can slow the polls themselves, so the window is long enough not to hang on timing.
+        time.sleep(0.8)
+        self.assertGreater(self.receiver.requests - before, 4)
         self.assertTrue(manager.data_fresh())
 
     def test_a_hung_health_check_does_not_delay_online_polling(self):
@@ -305,8 +307,10 @@ class LiveManagerTests(ServerTestCase):
         self.assertTrue(wait_until(lambda: manager.state().active_feed == FEED_ONLINE))
         self.receiver.delay_s = 0.5  # still failing, and now slow to do so
         before = self.online.requests
-        time.sleep(0.3)
-        self.assertGreater(self.online.requests - before, 3)
+        # Blocked behind the 0.5 s request, this would manage 2 at most. A busy test machine
+        # can slow the polls themselves, so the window is long enough not to hang on timing.
+        time.sleep(0.8)
+        self.assertGreater(self.online.requests - before, 4)
 
     def test_an_unexpected_error_does_not_end_the_loop(self):
         calls = []

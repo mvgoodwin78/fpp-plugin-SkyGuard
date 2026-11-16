@@ -181,7 +181,7 @@ function skyGuardCheckbox($title, $setting, $default) {
             <?php skyGuardSelect('Radius unit', 'radius_unit', 'mi', array('Miles' => 'mi', 'Nautical miles' => 'nm', 'Kilometers' => 'km')); ?>
             <?php skyGuardRowClose(); ?>
 
-            <?php skyGuardRowOpen('Show elevation', '', 'Your show's height above sea level. Aircraft report height above sea level, so SkyGuard subtracts this and the altitudes below become heights above your show. Leave at 0 to measure from sea level.'); ?>
+            <?php skyGuardRowOpen('Show elevation', '', 'The height of your show above sea level. Aircraft report height above sea level, so SkyGuard subtracts this and the altitudes below become heights above your show. Leave at 0 to measure from sea level.'); ?>
             <?php skyGuardNumber('show_elevation_ft', -1500, 15000, '0', 'feet'); ?>
             <button type="button" class="btn btn-sm btn-secondary mt-1" id="skyGuardElevationLookup">Look it up</button>
             <span class="small ms-2" id="skyGuardElevationNote"></span>
