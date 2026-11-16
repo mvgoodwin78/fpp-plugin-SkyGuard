@@ -465,6 +465,7 @@ function fppPluginSkyGuardTestLocalReceiver() {
     $working = 0;
     $stale = array();
     foreach ($bands as $band => $found) {
+        $band = strval($band);  // PHP turns the key '1090' into an int
         if ($found === null) {
             $receivers[] = array('band' => $band, 'state' => 'missing');
             continue;
