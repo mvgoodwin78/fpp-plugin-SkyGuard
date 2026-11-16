@@ -207,6 +207,34 @@
 				}
 			}
 		},
+		"/api/plugin/fpp-plugin-SkyGuard/find-receiver": {
+			"post": {
+				"summary": "Find a receiver's addresses from its host",
+				"description": "Runs from FPP. Tries the usual decoder pages (skyaware, tar1090, dump1090-fa, dump1090, /data for 1090; skyaware978, dump978-fa for 978) on ports 80 and 8080, or only the port given, all at once. Returns receiver_url and receiver_978_url (null when none answered with current aircraft data) and aircraft_1090 and aircraft_978 counts. Never passes on what a page sent back. Saves nothing; the page saves the addresses.",
+				"requestBody": {
+					"required": true,
+					"description": "{\"host\": \"192.168.1.50\"} or \"192.168.1.50:8080\"",
+					"content": {
+						"application/json": {
+							"schema": {
+								"type": "object"
+							}
+						}
+					}
+				},
+				"responses": {
+					"200": {
+						"description": "OK"
+					},
+					"400": {
+						"description": "Not a host name or IP address"
+					},
+					"502": {
+						"description": "No answer, or no decoder page with current aircraft data"
+					}
+				}
+			}
+		},
 		"/api/plugin/fpp-plugin-SkyGuard/elevation": {
 			"post": {
 				"summary": "Look up the ground elevation at the saved center point",

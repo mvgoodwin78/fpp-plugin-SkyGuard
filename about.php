@@ -83,7 +83,7 @@
             <dd>During a show the heads stay dark until data returns. Use the Test buttons on the Data Source tab to find out which source has stopped.</dd>
 
             <dt>"The receiver isn't responding" or "Using the online feed"</dt>
-            <dd>Check that your receiver is on and that its address is right. For a receiver on the FPP box, check that the decoder is running and writes JSON (for readsb, <code>--write-json /run/readsb</code>). SkyGuard goes back to it by itself when it answers.</dd>
+            <dd>Check that your receiver is on and that its address is right. For a receiver on another Pi, type its IP address under Find my receiver and press Find: SkyGuard tries the usual decoder pages and fills in the addresses. If the receiver Pi also runs FPP, FPP's web server has port 80, so the decoder pages must be served on another port such as 8080. For a receiver on the FPP box, check that the decoder is running and writes JSON (for readsb, <code>--write-json /run/readsb</code>). SkyGuard goes back to it by itself when it answers.</dd>
 
             <dt>A head says "Model not found in FPP"</dt>
             <dd>The model was renamed or deleted in FPP. If SkyGuard had found it before, it keeps holding the channels the model last had, so the head still goes dark. Pick the model again, or upload your models from xLights again.</dd>

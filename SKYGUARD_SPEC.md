@@ -456,8 +456,8 @@ Every setting below lives in `config/plugin.fpp-plugin-SkyGuard` except the fixt
 | `enabled` | true | Set by Enable/Disable commands too |
 | `source_mode` | receiver | `receiver`, `online`, `both`. The local option is the default (guidelines §14.2), so nothing is sent online until the user picks it |
 | `receiver_location` | other | `other` (another device, by address) or `this_box` (the decoder's files on the FPP box; the two address settings are then ignored) |
-| `receiver_url` | empty | e.g. `http://<receiver-ip>/data/aircraft.json` |
-| `receiver_978_url` | empty | Optional second decoder |
+| `receiver_url` | empty | e.g. `http://<receiver-ip>/skyaware/data/aircraft.json`. The page's Find button fills it in from just the receiver's IP address |
+| `receiver_978_url` | empty | Optional second decoder, e.g. `http://<receiver-ip>/skyaware978/data/aircraft.json`. Find fills it in too |
 | `online_provider` | adsb.fi | From the provider list |
 | `personal_use_confirmed` | false | The plugin stays IDLE until true, on every setup. Set by first-run setup |
 | `online_api_key` | empty | **Private.** Loaded but not sent yet: none of the current providers takes a key. Never logged, never in a URL |
@@ -597,7 +597,7 @@ Setup walkthrough, how the blackout works (which channels, fail-safe behavior), 
 - SkyGuard Test Trigger gains an optional `fixture` argument (blacks out one head for 3 s).
 - Status JSON gains `events[]` (last 20 transitions).
 - `api.php` gains fixture endpoints: list, add, update and delete one row, so rows save on change. Rows carry a stable `id`, which the status also reports.
-- `api.php` gains `GET`/`PUT private` for the center and API key, which never returns the key, only `api_key_set`; and `POST test-receiver` and `POST test-online`, which report a count or an error and never pass a response on. `test-online` needs personal use confirmed and a center, and is limited to one request every 5 s.
+- `api.php` gains `GET`/`PUT private` for the center and API key, which never returns the key, only `api_key_set`; and `POST test-receiver` and `POST test-online`, which report a count or an error and never pass a response on. `POST find-receiver` takes `{"host": ...}` (an IP address or name, optionally with a port; a pasted URL keeps only its host and port) and tries the usual decoder pages at once on ports 80 and 8080, or only the port given: for 1090 `/skyaware/data/`, `/tar1090/data/`, `/dump1090-fa/data/`, `/dump1090/data/`, `/data/`; for 978 `/skyaware978/data/`, `/dump978-fa/data/`, each with `aircraft.json`. The first page in that order with current data (`now` within 10 s) wins for each band. It returns the addresses and counts, saves nothing, and never passes on a page's content. Port 8080 is there because on a Pi that also runs FPP, FPP's Apache has port 80 and the decoders' lighttpd has to move. `test-online` needs personal use confirmed and a center, and is limited to one request every 5 s.
 - Every write route requires `Content-Type: application/json`, so a page on another site can't send one as a simple request. Free-text settings refuse `"` and `\\`, because FPP 9.5 writes settings into an inline script without escaping them.
 - A `no_fixtures` warning shows while enabled and confirmed with no head that resolves to a channel, cleared by `fixtures_set`.
 - New settings: `units`, `setup_state`, `map_tile_url`.

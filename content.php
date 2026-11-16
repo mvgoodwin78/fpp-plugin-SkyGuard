@@ -90,13 +90,19 @@ function skyGuardCheckbox($title, $setting, $default) {
             </div>
 
             <div data-show-with="receiver-other">
-                <?php skyGuardRowOpen('Receiver address', '', 'For example http://192.168.1.50/data/aircraft.json'); ?>
+                <?php skyGuardRowOpen('Find my receiver', '', 'Enter the IP address or name of the Pi the receiver is on, then press Find. SkyGuard tries the usual decoder pages on ports 80 and 8080 and fills in the addresses below.'); ?>
+                <input type="text" class="form-control" id="skyGuardReceiverHost" maxlength="300" placeholder="192.168.1.50" aria-label="Receiver IP address or name" autocomplete="off">
+                <button type="button" class="btn btn-sm btn-secondary mt-1" id="skyGuardFindReceiver">Find</button>
+                <span class="small ms-2" id="skyGuardFindReceiverResult"></span>
+                <?php skyGuardRowClose(); ?>
+
+                <?php skyGuardRowOpen('Receiver address', '', 'For example http://192.168.1.50/skyaware/data/aircraft.json'); ?>
                 <input type="url" class="form-control" id="skyGuardReceiverUrl" data-free-text="receiver_url" maxlength="300" aria-label="Receiver address">
                 <button type="button" class="btn btn-sm btn-secondary mt-1" id="skyGuardTestReceiver">Test</button>
                 <span class="small ms-2" id="skyGuardTestReceiverResult"></span>
                 <?php skyGuardRowClose(); ?>
 
-                <?php skyGuardRowOpen('978 MHz decoder address', '', 'Optional, for a separate UAT decoder'); ?>
+                <?php skyGuardRowOpen('978 MHz decoder address', '', 'Optional, for a 978 MHz (UAT) decoder. For example http://192.168.1.50/skyaware978/data/aircraft.json'); ?>
                 <input type="url" class="form-control" id="skyGuardReceiver978Url" data-free-text="receiver_978_url" maxlength="300" aria-label="978 MHz decoder address">
                 <button type="button" class="btn btn-sm btn-secondary mt-1" id="skyGuardTest978">Test</button>
                 <span class="small ms-2" id="skyGuardTest978Result"></span>

@@ -208,6 +208,73 @@ function skyGuardSettingSaved(key) {
         });
     }
 
+    function hostOf(url) {
+        try {
+            return new URL(url).host.toLowerCase();
+        } catch (error) {
+            return '';
+        }
+    }
+
+    /* Find: fills in the receiver addresses from just the Pi's address. A field Find found
+       nothing for is kept, unless it points at the same Pi, where it is now known not to work. */
+    function setupFindReceiver() {
+        var field = byId('skyGuardReceiverHost');
+        var result = byId('skyGuardFindReceiverResult');
+        function fill(id, url, searched) {
+            var target = byId(id);
+            if (url) {
+                target.value = url;
+            } else if (target.value && searched.indexOf(hostOf(target.value)) >= 0) {
+                target.value = '';
+            } else {
+                return;
+            }
+            target.dispatchEvent(new Event('change'));
+        }
+        /* The host:port pairs Find searched, written as URL.host writes them. */
+        function searchedHosts(typed) {
+            var authority = typed.replace(/^[a-z]+:\/\//i, '').split('/')[0];
+            var host = hostOf('http://' + authority);
+            if (/:\d+$/.test(authority)) {
+                return [host];
+            }
+            return [host, host + ':8080'];
+        }
+        byId('skyGuardFindReceiver').addEventListener('click', function () {
+            var host = field.value.trim();
+            if (!host) {
+                result.className = 'small ms-2 text-danger';
+                result.textContent = 'Enter the receiver’s IP address first.';
+                return;
+            }
+            result.className = 'small ms-2 text-body-secondary';
+            result.textContent = 'Looking…';
+            request('POST', API + 'find-receiver', { host: host }).then(function (doc) {
+                var searched = searchedHosts(host);
+                fill('skyGuardReceiverUrl', doc.receiver_url, searched);
+                fill('skyGuardReceiver978Url', doc.receiver_978_url, searched);
+                result.className = 'small ms-2 text-success';
+                result.textContent = 'Found:';
+                [['1090 MHz', doc.receiver_url, doc.aircraft_1090], ['978 MHz', doc.receiver_978_url, doc.aircraft_978]].forEach(function (band) {
+                    var row = document.createElement('span');
+                    row.className = 'd-block ' + (band[1] ? 'text-success' : 'text-body-secondary');
+                    row.textContent = band[1] ? band[0] + ': ' + band[2] + ' aircraft, at ' + band[1] : band[0] + ': none found';
+                    result.appendChild(row);
+                });
+            }).catch(function (error) {
+                result.className = 'small ms-2 text-danger';
+                result.textContent = error.message;
+            });
+        });
+        field.addEventListener('keydown', function (event) {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                byId('skyGuardFindReceiver').click();
+            }
+        });
+    }
+
     function urlBody(fieldId, resultId) {
         return function () {
             var value = byId(fieldId).value.trim();
@@ -1063,6 +1130,7 @@ function skyGuardSettingSaved(key) {
         setupPlaceholders();
         setupFreeText('skyGuardReceiverUrl', 'receiver_url');
         setupFreeText('skyGuardReceiver978Url', 'receiver_978_url');
+        setupFindReceiver();
         setupFreeText('skyGuardMessage', 'matrix_message');
         setupFreeText('skyGuardNoData', 'matrix_nodata_message');
         setupModels();

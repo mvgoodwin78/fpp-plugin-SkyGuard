@@ -15,6 +15,7 @@ function getEndpointsfpppluginSkyGuard() {
         array('method' => 'PUT', 'endpoint' => 'fixtures/:id', 'callback' => 'fppPluginSkyGuardFixtureUpdate'),
         array('method' => 'DELETE', 'endpoint' => 'fixtures/:id', 'callback' => 'fppPluginSkyGuardFixtureDelete'),
         array('method' => 'POST', 'endpoint' => 'test-receiver', 'callback' => 'fppPluginSkyGuardTestReceiver'),
+        array('method' => 'POST', 'endpoint' => 'find-receiver', 'callback' => 'fppPluginSkyGuardFindReceiver'),
         array('method' => 'POST', 'endpoint' => 'test-online', 'callback' => 'fppPluginSkyGuardTestOnline'),
     );
 }
@@ -423,6 +424,143 @@ function fppPluginSkyGuardTestReceiver() {
         return fppPluginSkyGuardError(502, 'The answer was not aircraft data.');
     }
     return json(array('status' => 'OK', 'aircraft' => count($doc['aircraft'])));
+}
+
+// Where decoders usually serve aircraft.json, most likely first. Keep in step with the
+// Help page.
+function fppPluginSkyGuardDecoderPages() {
+    return array(
+        '1090' => array(
+            '/skyaware/data/aircraft.json',
+            '/tar1090/data/aircraft.json',
+            '/dump1090-fa/data/aircraft.json',
+            '/dump1090/data/aircraft.json',
+            '/data/aircraft.json',
+        ),
+        '978' => array(
+            '/skyaware978/data/aircraft.json',
+            '/dump978-fa/data/aircraft.json',
+        ),
+    );
+}
+
+// The host and ports to try, from what was typed: "192.168.1.50", "pi.local:8080", or a
+// pasted address, of which only the host and port are kept. Null if it isn't a host.
+function fppPluginSkyGuardFindTargets($typed) {
+    $typed = trim($typed);
+    if (strpos($typed, '://') === false) {
+        $typed = 'http://' . $typed;
+    }
+    $parts = parse_url($typed);
+    if (!is_array($parts) || !isset($parts['host']) || strtolower(strval($parts['scheme'])) !== 'http') {
+        return null;
+    }
+    $host = $parts['host'];
+    $plain = preg_match('/^[A-Za-z0-9]([A-Za-z0-9.-]{0,251}[A-Za-z0-9])?$/', $host);
+    $ipv6 = preg_match('/^\[[0-9A-Fa-f:.]{2,45}\]$/', $host);
+    if (!$plain && !$ipv6) {
+        return null;
+    }
+    if (isset($parts['port'])) {
+        $port = intval($parts['port']);
+        if ($port < 1 || $port > 65535) {
+            return null;
+        }
+        return array($host, array($port));
+    }
+    // 8080 is where the decoders' web server goes on a Pi that also runs FPP.
+    return array($host, array(80, 8080));
+}
+
+// POST /api/plugin/fpp-plugin-SkyGuard/find-receiver with {"host": "192.168.1.50"}
+// Tries the usual decoder pages on that host, all at once, and returns the addresses that
+// answer with aircraft data. Like the test, it never passes on what a page sent back.
+function fppPluginSkyGuardFindReceiver() {
+    $body = fppPluginSkyGuardJsonBody();
+    if ($body === null || !isset($body['host']) || !is_string($body['host']) || strlen($body['host']) > 300) {
+        return fppPluginSkyGuardError(400, 'Enter the receiver\'s address, for example 192.168.1.50.');
+    }
+    $target = fppPluginSkyGuardFindTargets($body['host']);
+    if ($target === null) {
+        return fppPluginSkyGuardError(400, 'Enter just the receiver\'s IP address or name, for example 192.168.1.50 or 192.168.1.50:8080.');
+    }
+    list($host, $ports) = $target;
+
+    $multi = curl_multi_init();
+    $tries = array();
+    foreach (fppPluginSkyGuardDecoderPages() as $band => $paths) {
+        foreach ($ports as $port) {
+            foreach ($paths as $path) {
+                $url = 'http://' . $host . ($port === 80 ? '' : ':' . $port) . $path;
+                $curl = curl_init($url);
+                curl_setopt($curl, CURLOPT_RETURNTRANSFER, true);
+                curl_setopt($curl, CURLOPT_FOLLOWLOCATION, false);
+                curl_setopt($curl, CURLOPT_CONNECTTIMEOUT, 2);
+                curl_setopt($curl, CURLOPT_TIMEOUT, 3);
+                curl_setopt($curl, CURLOPT_USERAGENT, 'fpp-plugin-SkyGuard');
+                curl_multi_add_handle($multi, $curl);
+                $tries[] = array(strval($band), $url, $curl);
+            }
+        }
+    }
+    do {
+        $status = curl_multi_exec($multi, $running);
+        if ($running) {
+            curl_multi_select($multi, 0.2);
+        }
+    } while ($running && $status === CURLM_OK);
+
+    $found = array('1090' => null, '978' => null);
+    $stale = array('1090' => null, '978' => null);
+    $answered = false;
+    foreach ($tries as $try) {
+        list($band, $url, $curl) = $try;
+        $text = curl_multi_getcontent($curl);
+        $code = curl_getinfo($curl, CURLINFO_RESPONSE_CODE);
+        if (intval($code) > 0) {
+            $answered = true;
+        }
+        curl_multi_remove_handle($multi, $curl);
+        curl_close($curl);
+        if (intval($code) !== 200 || !is_string($text) || strlen($text) > 16 * 1024 * 1024) {
+            continue;
+        }
+        $doc = json_decode($text, true);
+        if (!is_array($doc) || !isset($doc['aircraft']) || !is_array($doc['aircraft']) || !isset($doc['now'])) {
+            continue;
+        }
+        $now = floatval($doc['now']);
+        if ($now > 1e11) {
+            $now /= 1000.0;
+        }
+        $entry = array('url' => $url, 'aircraft' => count($doc['aircraft']));
+        // The first page in the list wins, so the choice doesn't depend on which answered first.
+        if (abs(time() - $now) <= 10) {
+            if ($found[$band] === null) {
+                $found[$band] = $entry;
+            }
+        } elseif ($stale[$band] === null) {
+            $stale[$band] = $entry;
+        }
+    }
+    curl_multi_close($multi);
+
+    if ($found['1090'] === null && $found['978'] === null) {
+        if ($stale['1090'] !== null || $stale['978'] !== null) {
+            return fppPluginSkyGuardError(502, 'Found aircraft data on ' . $host . ', but it has stopped updating. Is the decoder running?');
+        }
+        if (!$answered) {
+            return fppPluginSkyGuardError(502, 'No answer from ' . $host . ' on port ' . implode(' or ', $ports) . '. Check the address and that the receiver is on.');
+        }
+        return fppPluginSkyGuardError(502, $host . ' answered, but none of the usual decoder pages had aircraft data. Enter the address by hand; see Help.');
+    }
+    return json(array(
+        'status' => 'OK',
+        'receiver_url' => $found['1090'] === null ? null : $found['1090']['url'],
+        'aircraft_1090' => $found['1090'] === null ? null : $found['1090']['aircraft'],
+        'receiver_978_url' => $found['978'] === null ? null : $found['978']['url'],
+        'aircraft_978' => $found['978'] === null ? null : $found['978']['aircraft'],
+    ));
 }
 
 // The files a decoder on this box writes, as (name, band, path). Keep in step with
