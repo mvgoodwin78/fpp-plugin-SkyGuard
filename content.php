@@ -187,6 +187,10 @@ function skyGuardCheckbox($title, $setting, $default) {
             <?php skyGuardSelect('Radius unit', 'radius_unit', 'mi', array('Miles' => 'mi', 'Nautical miles' => 'nm', 'Kilometers' => 'km')); ?>
             <?php skyGuardRowClose(); ?>
 
+            <?php skyGuardRowOpen('Map range', '', 'How far out the map and aircraft list show aircraft, in the radius unit, 1 to 250. Only for seeing what is coming: blackouts use the radius.'); ?>
+            <?php skyGuardNumber('map_range', 1, 250, '25'); ?>
+            <?php skyGuardRowClose(); ?>
+
             <?php skyGuardRowOpen('Show elevation', '', 'The height of your show above sea level. Aircraft report height above sea level, so SkyGuard subtracts this and the altitudes below become heights above your show. Leave at 0 to measure from sea level.'); ?>
             <?php skyGuardNumber('show_elevation_ft', -1500, 15000, '0', 'feet'); ?>
             <button type="button" class="btn btn-sm btn-secondary mt-1" id="skyGuardElevationLookup">Look it up</button>

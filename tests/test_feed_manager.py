@@ -240,9 +240,14 @@ class OnlinePollingTests(unittest.TestCase):
         self.assertEqual(h.net.count(ONLINE), 4)
 
     def test_the_query_uses_the_center_and_twice_the_radius(self):
-        h = Harness(source_mode="online", radius=10.0, radius_unit="nm")
+        h = Harness(source_mode="online", radius=10.0, radius_unit="nm", map_range=5.0)
         h.run_for(1)
         self.assertEqual(h.net.calls[0], "https://api.adsb.lol/v2/point/40.0000/-75.0000/20")
+
+    def test_the_query_covers_the_map_range_when_it_is_larger(self):
+        h = Harness(source_mode="online", radius=2.0, radius_unit="nm", map_range=25.0)
+        h.run_for(1)
+        self.assertEqual(h.net.calls[0], "https://api.adsb.lol/v2/point/40.0000/-75.0000/25")
 
     def test_online_records_are_tagged_with_the_provider(self):
         self.h.run_for(1)

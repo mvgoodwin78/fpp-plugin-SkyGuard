@@ -173,7 +173,7 @@ class FeedManager:
             settings.online_provider,
             settings.center_lat,
             settings.center_lon,
-            settings.radius_nm * DISPLAY_RANGE_RADII,
+            max(settings.radius_nm * DISPLAY_RANGE_RADII, settings.map_range_nm),
             self._fetch,
         )
 

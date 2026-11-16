@@ -100,20 +100,85 @@
         }, 0);
     }
 
-    function showLegend(box, list) {
+    /* How far out aircraft are shown, in meters, or 0. A map without aircraft ignores it. */
+    function rangeMeters(status, options) {
+        var unit = (status.radius || {}).unit;
+        if (options.aircraft === false || typeof status.map_range !== 'number' || !METERS[unit]) {
+            return 0;
+        }
+        return status.map_range * METERS[unit];
+    }
+
+    /* Range rings: a round step that gives three or four rings out to the map range, which is
+       always the outer ring. Distances are in the radius unit. */
+    var RING_STEPS = [0.25, 0.5, 1, 2, 2.5, 5, 10, 15, 20, 25, 50, 100];
+
+    function rangeRings(status, options) {
+        if (!rangeMeters(status, options)) {
+            return null;
+        }
+        var range = status.map_range;
+        var step = RING_STEPS[RING_STEPS.length - 1];
+        for (var i = 0; i < RING_STEPS.length; i++) {
+            if (RING_STEPS[i] >= range / 4) {
+                step = RING_STEPS[i];
+                break;
+            }
+        }
+        var rings = [];
+        for (var d = step; d < range - step / 4; d += step) {
+            rings.push(d);
+        }
+        rings.push(range);
+        return { unit: status.radius.unit, step: step, range: range, rings: rings };
+    }
+
+    function legendEntry(box, swatchClass, text) {
+        var entry = document.createElement('span');
+        entry.className = 'skyguard-legend-item';
+        var swatch = document.createElement('span');
+        swatch.className = swatchClass;
+        entry.appendChild(swatch);
+        entry.appendChild(document.createTextNode(text));
+        box.appendChild(entry);
+    }
+
+    /* The radii, and on the scope what each blip and ring means. */
+    function showLegend(box, list, scope) {
         if (!box) {
             return;
         }
         box.replaceChildren();
+        box.classList.toggle('skyguard-scope-legend', !!scope);
+        var radiiRow = box;
+        if (scope) {
+            var blips = document.createElement('div');
+            legendEntry(blips, 'skyguard-key-blip', 'Aircraft');
+            legendEntry(blips, 'skyguard-key-blip skyguard-key-blip-zone', 'In the zone');
+            legendEntry(blips, 'skyguard-key-blip skyguard-key-blip-ignored', 'On the ground, ignored');
+            legendEntry(blips, 'skyguard-key-blip skyguard-key-helicopter', 'Helicopter');
+            legendEntry(blips, 'skyguard-key-missed', 'Receiver missed it (online data only)');
+            legendEntry(blips, 'skyguard-key-heading', 'Heading');
+            box.appendChild(blips);
+            radiiRow = document.createElement('div');
+            box.appendChild(radiiRow);
+        }
         list.forEach(function (item) {
-            var entry = document.createElement('span');
-            entry.className = 'skyguard-legend-item';
-            var swatch = document.createElement('span');
-            swatch.className = 'skyguard-swatch skyguard-swatch-' + item.kind + (item.active ? '' : ' skyguard-swatch-standby');
-            entry.appendChild(swatch);
-            entry.appendChild(document.createTextNode(item.label + ': ' + item.text + (item.active ? ' (in use now)' : '')));
-            box.appendChild(entry);
+            legendEntry(radiiRow, 'skyguard-swatch skyguard-swatch-' + item.kind + (item.active ? '' : ' skyguard-swatch-standby'),
+                item.label + ': ' + item.text + (item.active ? ' (in use now)' : ''));
         });
+        if (scope && scope.rings) {
+            legendEntry(radiiRow, 'skyguard-swatch skyguard-swatch-range',
+                'Range rings every ' + scope.rings.step + ' ' + scope.rings.unit + ', out to ' + scope.rings.range + ' ' + scope.rings.unit);
+        }
+    }
+
+    /* A point the given meters north and east of center. Close enough for drawing at these distances. */
+    function offsetLatLng(center, north, east) {
+        return [
+            center[0] + north / METERS_PER_DEGREE,
+            center[1] + east / (METERS_PER_DEGREE * Math.cos(center[0] * Math.PI / 180))
+        ];
     }
 
     function hasCenter(status) {
@@ -133,10 +198,27 @@
         return aircraft.category === 'A7';
     }
 
-    /* Seen from above, nose up: crossed rotor blades over the body and tail. */
-    var HELICOPTER_SHAPE = 'M-8.85 -9.15 L-7.15 -10.85 L8.85 5.15 L7.15 6.85 Z ' +
-        'M7.15 -10.85 L8.85 -9.15 L-7.15 6.85 L-8.85 5.15 Z ' +
-        'M0 -7 C2.5 -7 3.5 -4.5 3.5 -2 C3.5 0.5 2 2.5 1 3.5 V8.5 H4 V11 H-4 V8.5 H-1 V3.5 C-2 2.5 -3.5 0.5 -3.5 -2 C-3.5 -4.5 -2.5 -7 0 -7 Z';
+    /* One blip, drawn at 0,0 in the given units: a dot (a diamond for a helicopter), a line
+       toward its heading when it reports one, and a ring when only online data saw it. */
+    function drawBlip(parent, aircraft, size, classes) {
+        if (aircraft.online_only) {
+            parent.appendChild(svgElement('circle', { 'class': 'skyguard-missed-ring', r: size * 2.6 }));
+        }
+        if (typeof aircraft.track_deg === 'number') {
+            parent.appendChild(svgElement('line', {
+                'class': 'skyguard-blip-heading', x1: 0, y1: 0, x2: 0, y2: -size * 3,
+                transform: 'rotate(' + aircraft.track_deg + ')'
+            }));
+        }
+        if (isHelicopter(aircraft)) {
+            parent.appendChild(svgElement('path', {
+                'class': classes + ' skyguard-helicopter-shape',
+                d: 'M0 ' + (-size * 1.3) + ' L' + (size * 1.3) + ' 0 L0 ' + (size * 1.3) + ' L' + (-size * 1.3) + ' 0 Z'
+            }));
+        } else {
+            parent.appendChild(svgElement('circle', { 'class': classes, r: size }));
+        }
+    }
 
     /* Labels on every aircraft hide each other, so only the ones that matter have one to start with. */
     function labelShown(aircraft, opened) {
@@ -155,8 +237,10 @@
         var list = radii(status);
         var largest = largestMeters(list);
         var center = status.center;
-        /* The largest radius is halfway out, leaving room for aircraft approaching it. */
-        var scale = largest ? 50 / largest : null;
+        /* The outer ring is the map range. Without one, the largest radius is halfway out,
+           leaving room for aircraft approaching it. */
+        var outer = Math.max(largest * 2, rangeMeters(status, options));
+        var scale = outer ? 100 / outer : null;
 
         function text(x, y, value) {
             var label = svgElement('text', { 'class': 'skyguard-radar-text', x: x, y: y });
@@ -167,6 +251,20 @@
         plot.appendChild(svgElement('line', { 'class': 'skyguard-radar-axis', x1: -100, y1: 0, x2: 100, y2: 0 }));
         plot.appendChild(svgElement('line', { 'class': 'skyguard-radar-axis', x1: 0, y1: -100, x2: 0, y2: 100 }));
         plot.appendChild(svgElement('circle', { 'class': 'skyguard-radar-ring', r: 100 }));
+        var rings = rangeRings(status, options);
+        if (rings && scale) {
+            rings.rings.slice(0, -1).forEach(function (d) {
+                var r = d * METERS[rings.unit] * scale;
+                plot.appendChild(svgElement('circle', { 'class': 'skyguard-radar-ring', r: r }));
+                text(-r + 1, -1.5, d + ' ' + rings.unit);
+            });
+            text(-99, -1.5, rings.range + ' ' + rings.unit);
+        }
+        if (options.aircraft !== false) {
+            var sweep = svgElement('g', { 'class': 'skyguard-radar-sweep' });
+            sweep.appendChild(svgElement('path', { 'class': 'skyguard-radar-sweep-wedge', d: 'M0 0 L0 -100 A100 100 0 0 1 50 -86.6 Z' }));
+            plot.appendChild(sweep);
+        }
         list.forEach(function (item) {
             var ring = item.meters * scale;
             plot.appendChild(svgElement('circle', {
@@ -186,14 +284,10 @@
                 if (Math.sqrt(x * x + y * y) > 104) {
                     return;
                 }
-                var track = typeof aircraft.track_deg === 'number' ? aircraft.track_deg : 0;
                 var cls = planeClass(aircraft, 'skyguard-radar-plane-zone', 'skyguard-radar-plane-ignored');
-                var helicopter = isHelicopter(aircraft);
-                plot.appendChild(svgElement('path', {
-                    'class': ('skyguard-radar-plane ' + cls).trim(),
-                    d: helicopter ? HELICOPTER_SHAPE : 'M0 -4 L3 3 L0 1.5 L-3 3 Z',
-                    transform: 'translate(' + x + ' ' + y + ') rotate(' + track + ')' + (helicopter ? ' scale(0.5)' : '')
-                }));
+                var blip = svgElement('g', { transform: 'translate(' + x + ' ' + y + ')' });
+                drawBlip(blip, aircraft, 2.2, ('skyguard-radar-plane ' + cls).trim());
+                plot.appendChild(blip);
                 /* Larger than the shape, so a finger can hit it. */
                 var target = svgElement('circle', { 'class': 'skyguard-radar-target', cx: x, cy: y, r: 8 });
                 target.addEventListener('click', function () {
@@ -215,14 +309,15 @@
         var wrap = document.createElement('div');
         wrap.className = ('skyguard-plane ' + planeClass(aircraft, 'skyguard-plane-zone', 'skyguard-plane-ignored')).trim();
         var drawing = svgElement('svg', { viewBox: '-12 -12 24 24' });
-        var track = typeof aircraft.track_deg === 'number' ? aircraft.track_deg : 0;
-        drawing.appendChild(svgElement('path', {
-            'class': 'skyguard-plane-shape' + (isHelicopter(aircraft) ? ' skyguard-helicopter-shape' : ''),
-            d: isHelicopter(aircraft) ? HELICOPTER_SHAPE : 'M0 -11 L2 -3 L10 3 L10 5 L2 2 L1.5 7 L4 9 L4 10.5 L0 9.5 L-4 10.5 L-4 9 L-1.5 7 L-2 2 L-10 5 L-10 3 L-2 -3 Z',
-            transform: 'rotate(' + track + ')'
-        }));
+        drawBlip(drawing, aircraft, 3.5, 'skyguard-blip-dot');
         wrap.appendChild(drawing);
         return L.divIcon({ html: wrap, className: '', iconSize: [24, 24], iconAnchor: [12, 12] });
+    }
+
+    function rangeLabel(text) {
+        var label = document.createElement('span');
+        label.textContent = text;
+        return L.divIcon({ html: label, className: 'skyguard-range-label', iconSize: null });
     }
 
     function planeLabel(aircraft, info) {
@@ -257,7 +352,32 @@
         var last = null;
         var usingRadar = false;
         var tileTimer = null;
+        var sweep = null;
+        var sweepAt = null; /* [center, meters] the sweep is drawn for */
         var opened = {}; /* aircraft whose label was opened by hand, kept through each refresh */
+        /* The status map is a radar scope: dark, with the map faint underneath. The Location & Zone
+           map has no aircraft and stays a plain map, for placing the center. */
+        var scope = options.aircraft !== false;
+        box.classList.toggle('skyguard-scope', scope);
+
+        /* The sweep turns over the map range. It lives in its own pane so it pans with the map, and
+           is placed again after a zoom. */
+        function placeSweep() {
+            if (!sweep) {
+                return;
+            }
+            if (!sweepAt) {
+                sweep.hidden = true;
+                return;
+            }
+            var middle = map.latLngToLayerPoint(sweepAt[0]);
+            var edge = map.latLngToLayerPoint(offsetLatLng(sweepAt[0], sweepAt[1], 0));
+            var r = Math.max(0, middle.y - edge.y);
+            sweep.hidden = false;
+            sweep.style.left = (middle.x - r) + 'px';
+            sweep.style.top = (middle.y - r) + 'px';
+            sweep.style.width = sweep.style.height = (2 * r) + 'px';
+        }
 
         function toggleLabel(hex) {
             opened[hex] = !opened[hex];
@@ -281,6 +401,7 @@
             if (map) {
                 map.remove();
                 map = null;
+                sweep = null;
             }
             setNote(reason);
             if (last) {
@@ -294,6 +415,16 @@
                 dragging: !L.Browser.mobile /* so a finger on the map still scrolls the page */
             });
             map.attributionControl.setPrefix('');
+            if (scope) {
+                var pane = map.createPane('skyguardSweep');
+                pane.style.zIndex = 350;
+                pane.style.pointerEvents = 'none';
+                sweep = document.createElement('div');
+                sweep.className = 'skyguard-sweep leaflet-zoom-hide';
+                sweep.hidden = true;
+                pane.appendChild(sweep);
+                map.on('zoomend viewreset resize', placeSweep);
+            }
             layers = L.layerGroup().addTo(map);
             var loaded = false;
             var tiles = L.tileLayer(options.tiles, {
@@ -321,16 +452,32 @@
             var center = [status.center.lat, status.center.lon];
             var list = radii(status);
             var largest = largestMeters(list);
-            var key = center.join(',') + '/' + largest;
+            var range = rangeMeters(status, options);
+            var key = center.join(',') + '/' + largest + '/' + range;
             if (key !== viewKey) {
                 viewKey = key;
-                if (largest) {
-                    map.fitBounds(L.latLng(center).toBounds(largest * 2.4));
+                if (largest || range) {
+                    map.fitBounds(L.latLng(center).toBounds(Math.max(largest * 2.4, range * 2)));
                 } else {
                     map.setView(center, 10);
                 }
             }
             layers.clearLayers();
+            var rings = rangeRings(status, options);
+            if (rings) {
+                var outer = rings.range * METERS[rings.unit];
+                [[outer, 0, -outer, 0], [0, outer, 0, -outer]].forEach(function (axis) {
+                    L.polyline([offsetLatLng(center, axis[0], axis[1]), offsetLatLng(center, axis[2], axis[3])],
+                        { className: 'skyguard-range-axis', weight: 1, interactive: false }).addTo(layers);
+                });
+                rings.rings.forEach(function (d) {
+                    var meters = d * METERS[rings.unit];
+                    L.circle(center, { radius: meters, className: 'skyguard-range-ring', weight: 1, fill: false, interactive: false }).addTo(layers);
+                    L.marker(offsetLatLng(center, meters, 0), { icon: rangeLabel(d + ' ' + rings.unit), interactive: false, keyboard: false }).addTo(layers);
+                });
+            }
+            sweepAt = rings ? [center, rings.range * METERS[rings.unit]] : null;
+            placeSweep();
             list.forEach(function (item) {
                 L.circle(center, {
                     radius: item.meters,
@@ -362,15 +509,16 @@
                 if (map) {
                     map.remove();
                     map = null;
+                    sweep = null;
                     viewKey = null;
                 }
                 clearTimeout(tileTimer);
                 box.replaceChildren();
-                showLegend(options.legend, []);
+                showLegend(options.legend, [], null);
                 setNote('Set a center point to see the map.');
                 return;
             }
-            showLegend(options.legend, radii(status));
+            showLegend(options.legend, radii(status), scope ? { rings: rangeRings(status, options) } : null);
             var newTiles = null;
             if (!usingRadar && !map) {
                 if (!options.tiles || !window.L) {

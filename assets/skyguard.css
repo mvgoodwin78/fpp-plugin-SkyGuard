@@ -1,4 +1,6 @@
-/* SkyGuard's own styling. Colors come only from Bootstrap's variables, so both themes work. */
+/* SkyGuard's own styling. Colors come only from Bootstrap's variables, so both themes work. The
+   radar scope is dark in both themes: it uses Bootstrap's fixed palette (--bs-teal, --bs-gray-900
+   and so on), which neither theme changes. */
 
 .skyguard-map-area {
     height: min(60vh, 480px);
@@ -75,6 +77,7 @@
 .skyguard-plane {
     width: 24px;
     height: 24px;
+    cursor: pointer;
 }
 
 .skyguard-plane svg {
@@ -84,35 +87,136 @@
     overflow: visible;
 }
 
-.skyguard-plane-shape {
-    fill: var(--bs-primary);
-    stroke: var(--bs-body-bg);
-    stroke-width: 1;
+/* ---- The radar scope: the status page's map ---- */
+
+.skyguard-scope,
+.skyguard-scope-legend {
+    --sg-bg: var(--bs-gray-900);
+    --sg-edge: var(--bs-gray-800);
+    --sg-grid: var(--bs-teal);
+    --sg-text: var(--bs-gray-300);
+    --sg-blip: var(--bs-teal);
+    --sg-zone: var(--bs-red);
+    --sg-ignored: var(--bs-gray-500);
+    --sg-missed: var(--bs-yellow);
+    --sg-receiver: var(--bs-cyan);
+    --sg-online: var(--bs-pink);
 }
 
-/* Its parts overlap: the outline goes behind the fill, so it stays one solid shape. */
-.skyguard-helicopter-shape {
-    paint-order: stroke;
+.skyguard-scope {
+    background: var(--sg-bg);
+    border-color: var(--sg-edge);
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+/* The map underneath: grey, turned dark, and faint, so the blips stand out. */
+.skyguard-scope .leaflet-container,
+.skyguard-scope.leaflet-container {
+    background: var(--sg-bg);
+}
+
+.skyguard-scope .leaflet-tile-pane {
+    filter: grayscale(1) invert(1) contrast(0.9);
+    opacity: 0.32;
+}
+
+.skyguard-scope .skyguard-range-ring,
+.skyguard-scope .skyguard-range-axis {
+    stroke: var(--sg-grid);
+    stroke-opacity: 0.35;
+}
+
+.skyguard-range-label span {
+    display: inline-block;
+    transform: translate(-50%, -110%);
+    font-size: 0.65rem;
+    color: var(--sg-text);
+    opacity: 0.75;
+    white-space: nowrap;
+}
+
+.skyguard-sweep {
+    position: absolute;
+    border-radius: 50%;
+    pointer-events: none;
+    background: conic-gradient(from 0deg, transparent 0deg 290deg, var(--sg-blip) 359deg, transparent 360deg);
+    opacity: 0.22;
+    animation: skyguard-spin 6s linear infinite;
+}
+
+@keyframes skyguard-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.skyguard-scope .skyguard-zone-receiver {
+    stroke: var(--sg-receiver);
+    fill: var(--sg-receiver);
+}
+
+.skyguard-scope .skyguard-zone-online {
+    stroke: var(--sg-online);
+    fill: var(--sg-online);
+}
+
+.skyguard-scope .skyguard-center-dot {
+    stroke: var(--sg-bg);
+    fill: var(--sg-text);
+}
+
+/* A blip: a glowing dot, or a diamond for a helicopter, with a line toward its heading. */
+.skyguard-blip-dot,
+.skyguard-radar-plane {
+    fill: var(--sg-blip);
+    filter: drop-shadow(0 0 3px var(--sg-blip));
+}
+
+.skyguard-blip-heading {
+    stroke: var(--sg-blip);
     stroke-width: 1.5;
+    stroke-linecap: round;
+    opacity: 0.8;
 }
 
-.skyguard-plane-zone .skyguard-plane-shape {
-    fill: var(--bs-danger);
+.skyguard-plane-zone .skyguard-blip-dot,
+.skyguard-radar-plane-zone {
+    fill: var(--sg-zone);
+    filter: drop-shadow(0 0 4px var(--sg-zone));
 }
 
-.skyguard-plane-ignored .skyguard-plane-shape {
-    fill: var(--bs-secondary);
+.skyguard-plane-zone .skyguard-blip-heading {
+    stroke: var(--sg-zone);
+}
+
+.skyguard-plane-ignored .skyguard-blip-dot,
+.skyguard-radar-plane-ignored {
+    fill: var(--sg-ignored);
+    filter: none;
+}
+
+.skyguard-plane-ignored .skyguard-blip-heading {
+    stroke: var(--sg-ignored);
+}
+
+/* Around an aircraft only online data saw, which the receiver missed. */
+.skyguard-missed-ring {
+    fill: none;
+    stroke: var(--sg-missed);
+    stroke-width: 1.5;
 }
 
 .leaflet-tooltip.skyguard-label {
     font-size: 0.72rem;
     line-height: 1.15;
     white-space: nowrap;
-    background: var(--bs-body-bg);
-    color: var(--bs-body-color);
-    border: 1px solid var(--bs-border-color);
+    background: var(--bs-gray-900);
+    color: var(--bs-gray-300);
+    border: 1px solid var(--bs-gray-700);
+    border-radius: 4px;
     box-shadow: none;
-    padding: 1px 4px;
+    padding: 2px 5px;
 }
 
 .leaflet-tooltip.skyguard-label::before {
@@ -128,10 +232,45 @@
     background: var(--bs-tertiary-bg);
 }
 
+.skyguard-scope .skyguard-radar {
+    background: var(--sg-bg);
+}
+
 .skyguard-radar-ring {
     fill: none;
     stroke: var(--bs-border-color);
     stroke-width: 0.5;
+}
+
+.skyguard-scope .skyguard-radar-ring,
+.skyguard-scope .skyguard-radar-axis {
+    stroke: var(--sg-grid);
+    stroke-opacity: 0.35;
+}
+
+.skyguard-scope .skyguard-radar-text {
+    fill: var(--sg-text);
+    opacity: 0.8;
+}
+
+.skyguard-radar-sweep {
+    /* The plot's 0,0 is its center, which is where it turns. */
+    transform-box: view-box;
+    transform-origin: 0 0;
+    animation: skyguard-spin 6s linear infinite;
+}
+
+.skyguard-radar-sweep-wedge {
+    fill: var(--sg-blip);
+    fill-opacity: 0.12;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .skyguard-sweep,
+    .skyguard-radar-sweep {
+        display: none;
+        animation: none;
+    }
 }
 
 .skyguard-radar-zone {
@@ -154,18 +293,6 @@
     font-size: 5px;
 }
 
-.skyguard-radar-plane {
-    fill: var(--bs-primary);
-}
-
-.skyguard-radar-plane-zone {
-    fill: var(--bs-danger);
-}
-
-.skyguard-radar-plane-ignored {
-    fill: var(--bs-secondary);
-}
-
 .skyguard-radar-target {
     fill: transparent;
     cursor: pointer;
@@ -173,6 +300,92 @@
 
 .skyguard-radar-center {
     fill: var(--bs-primary);
+}
+
+.skyguard-scope .skyguard-radar-center {
+    fill: var(--sg-text);
+}
+
+/* ---- The legend under the scope: the same dark panel, joined to the bottom of the map ---- */
+
+.skyguard-scope-legend {
+    background: var(--sg-bg);
+    color: var(--sg-text);
+    border: 1px solid var(--sg-edge);
+    border-top: 0;
+    border-radius: 0 0 var(--bs-border-radius) var(--bs-border-radius);
+    padding: 0.4rem 0.75rem;
+    margin-top: -0.25rem;
+    font-size: 0.8rem;
+    line-height: 1.9;
+}
+
+.skyguard-scope-legend .skyguard-swatch-receiver {
+    border-top-color: var(--sg-receiver);
+}
+
+.skyguard-scope-legend .skyguard-swatch-online {
+    border-top-color: var(--sg-online);
+}
+
+.skyguard-swatch-range {
+    border-top: 1px solid var(--sg-grid, var(--bs-border-color));
+    opacity: 0.6;
+}
+
+.skyguard-key-blip {
+    display: inline-block;
+    width: 0.6em;
+    height: 0.6em;
+    border-radius: 50%;
+    background: var(--sg-blip);
+    box-shadow: 0 0 4px var(--sg-blip);
+}
+
+.skyguard-key-blip-zone {
+    background: var(--sg-zone);
+    box-shadow: 0 0 4px var(--sg-zone);
+}
+
+.skyguard-key-blip-ignored {
+    background: var(--sg-ignored);
+    box-shadow: none;
+}
+
+.skyguard-key-helicopter {
+    border-radius: 0;
+    transform: rotate(45deg) scale(0.85);
+}
+
+.skyguard-key-missed {
+    display: inline-block;
+    width: 0.95em;
+    height: 0.95em;
+    border-radius: 50%;
+    border: 1.5px solid var(--sg-missed);
+}
+
+.skyguard-key-heading {
+    display: inline-block;
+    width: 1em;
+    border-top: 1.5px solid var(--sg-blip);
+}
+
+/* Leaflet's controls on the dark scope */
+.skyguard-scope .leaflet-control-attribution {
+    background: var(--sg-bg);
+    color: var(--sg-text);
+    opacity: 0.8;
+}
+
+.skyguard-scope .leaflet-control-attribution a {
+    color: var(--sg-receiver);
+}
+
+.skyguard-scope .leaflet-bar a {
+    background: var(--sg-edge);
+    color: var(--sg-text);
+    border-bottom-color: var(--sg-bg);
 }
 
 /* FPP 9.5's theme sets every alert's text to white, which can't be read on the pale warning color.

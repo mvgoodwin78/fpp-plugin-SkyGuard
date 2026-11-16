@@ -404,12 +404,21 @@ class SecondRadiusDaemonTests(unittest.TestCase):
         rig.tick(30)
         self.assertEqual(rig.status()["radius"]["value"], 13.0)
 
-    def test_the_status_list_follows_the_radius_in_force(self):
-        # 11.5 mi away: beyond twice a 1 mi receiver radius, within twice the 13 mi online one.
-        rig = DaemonRig(self, {**self.SETTINGS, "radius_receiver": "1"})
+    def test_the_status_list_follows_the_map_range(self):
+        # 11.5 mi away: beyond a 5 mi map range and the 1 mi receiver radius.
+        rig = DaemonRig(self, {**self.SETTINGS, "radius_receiver": "1", "map_range": "5"})
         rig.aircraft = [self.BETWEEN]
         rig.tick(2)
         self.assertEqual(rig.status()["aircraft"], [])
+
+    def test_the_default_map_range_shows_aircraft_beyond_the_radius(self):
+        rig = DaemonRig(self, {**self.SETTINGS, "radius_receiver": "1"})
+        rig.aircraft = [self.BETWEEN]
+        rig.tick(2)
+        status = rig.status()
+        self.assertEqual([a["hex"] for a in status["aircraft"]], [self.BETWEEN["hex"]])
+        self.assertEqual(status["map_range"], 25.0)
+        self.assertEqual(status["aircraft_in_radius"], 0)
 
     def test_online_queries_cover_the_online_radius_even_if_the_receiver_one_is_small(self):
         rig = DaemonRig(self, {**self.SETTINGS, "radius_receiver": "1", "source_mode": "online"})

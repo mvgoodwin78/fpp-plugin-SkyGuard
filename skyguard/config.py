@@ -97,6 +97,7 @@ class Settings:
     radius: float | None = None  # used with online data; the user must enter it
     radius_receiver: float | None = None  # used with a receiver; the user must enter it
     radius_unit: str = "mi"
+    map_range: float = 25.0  # how far out the map and list show aircraft, in radius_unit; display only
     alt_floor_ft: float = 0.0
     alt_ceiling_ft: float = 10000.0
     show_elevation_ft: float = 0.0  # the show's height above sea level; the limits are above the show
@@ -144,6 +145,10 @@ class Settings:
     def radius_nm_for(self, feed):
         value = self.radius_for(feed)
         return None if value is None else to_nm(value, self.radius_unit)
+
+    @property
+    def map_range_nm(self):
+        return to_nm(self.map_range, self.radius_unit)
 
     @property
     def radius_nm(self):
@@ -323,6 +328,7 @@ def load_settings(raw, private=None):
         radius=read.number("radius", 0.01),
         radius_receiver=read.number("radius_receiver", 0.01),
         radius_unit=read.choice("radius_unit", RADIUS_UNITS),
+        map_range=read.number("map_range", 1, 250),
         alt_floor_ft=read.number("alt_floor_ft"),
         alt_ceiling_ft=read.number("alt_ceiling_ft"),
         show_elevation_ft=read.number("show_elevation_ft", -1500, 15000),

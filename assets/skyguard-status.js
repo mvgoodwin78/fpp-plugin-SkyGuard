@@ -231,6 +231,32 @@
         });
     }
 
+    /* One line under the map: how many aircraft are inside the radius in use, how far the map
+       reaches, and how many only the online check saw. */
+    function showRadiusCount(status) {
+        var line = byId('skyGuardRadiusCount');
+        var radius = status.radius || {};
+        if (typeof radius.value !== 'number' || !status.center || typeof status.center.lat !== 'number') {
+            line.textContent = '';
+            return;
+        }
+        var inRadius = status.aircraft_in_radius || 0;
+        var inZone = status.aircraft_in_zone || 0;
+        var which = status.active_feed === 'receiver' ? 'receiver' : 'online';
+        var text = 'Within your ' + radius.value + ' ' + radius.unit + ' ' + which + ' radius: ' +
+            inRadius + ' aircraft, ' + inZone + ' in the zone (radius and altitude).';
+        if (typeof status.map_range === 'number') {
+            text += ' The map shows aircraft up to ' + status.map_range + ' ' + radius.unit + ' out.';
+        }
+        var missed = (status.aircraft || []).filter(function (plane) {
+            return plane.online_only;
+        }).length;
+        if (missed) {
+            text += ' ' + missed + ' seen only in online data, which your receiver missed: circled on the map.';
+        }
+        line.textContent = text;
+    }
+
     var PAUSED_BETWEEN_SHOWS = 'No aircraft are shown, because SkyGuard only asks for online data during a show. ' +
         'They appear here once a show starts, or turn on "Check online data between shows" under Advanced in SkyGuard Settings.';
 
@@ -261,7 +287,7 @@
             note.textContent = 'No aircraft are shown, because the newest data is ' + Math.round(age / 60) +
                 ' minutes old.' + (status.enabled ? '' : ' SkyGuard does not request online data while it is disabled.');
         }
-        return Object.assign({}, status, { aircraft: [], aircraft_in_zone: 0 });
+        return Object.assign({}, status, { aircraft: [], aircraft_in_zone: 0, aircraft_in_radius: 0 });
     }
 
     function refresh() {
@@ -275,6 +301,7 @@
             showHeads(status);
             showEvents(status);
             showList(status);
+            showRadiusCount(status);
             if (map) {
                 map.update(status);
             }

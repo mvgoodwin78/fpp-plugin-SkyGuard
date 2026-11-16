@@ -535,6 +535,14 @@ class OnlineCheckTests(unittest.TestCase):
         self.assertTrue(entry["online_only"])
         self.assertTrue(entry["in_zone"])
 
+    def test_the_radius_count_judges_each_aircraft_by_its_own_radius(self):
+        # Seen by both at 6.9 mi: outside the 5 mi receiver radius. Missed at 6.9 mi: inside
+        # the 10 mi online radius that judges it. Near: inside either.
+        missed = plane({**self.BETWEEN, "hex": "b2"})
+        self.feeds([plane(self.BETWEEN), plane({**self.NEAR, "hex": "c3"})],
+                   [plane(self.BETWEEN), missed, plane({**self.NEAR, "hex": "c3"})])
+        self.assertEqual(self.r.status()["aircraft_in_radius"], 2)
+
     def test_seen_by_both_outside_the_receiver_radius_does_not_black_out(self):
         self.feeds([plane(self.BETWEEN)], [plane(self.BETWEEN)])
         self.assertEqual(self.r.state, "CLEAR")

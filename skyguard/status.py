@@ -13,7 +13,6 @@ from .notifier import LOGGER_NAME
 from .overlay import atomic_write_json
 from .trigger import height_above_show
 
-DISPLAY_RANGE_RADII = 2.0
 PERIODIC_WRITE_S = 5.0  # matches the 5 s map refresh, and spares the SD card a write per second
 MAX_EVENTS = 20
 MAX_EVENT_AIRCRAFT = 10
@@ -56,10 +55,24 @@ def _aircraft_entry(evaluated, settings, feed):
     }
 
 
-def _in_display_range(evaluated, radius_nm):
+def _judging_radius_nm(evaluated, settings, feed):
+    """The radius this aircraft is judged by: the online one for an aircraft only the online
+    check saw, otherwise the active feed's."""
+    return settings.radius_nm_for(FEED_ONLINE if _online_only(evaluated, feed) else feed)
+
+
+def _in_display_range(evaluated, settings, feed):
+    """The map range, display only, but never less than the radius the aircraft is judged by."""
     if evaluated.distance_nm is None:
         return True  # no position: list it, since it may be what is holding a blackout
-    return evaluated.distance_nm <= radius_nm * DISPLAY_RANGE_RADII
+    radius_nm = _judging_radius_nm(evaluated, settings, feed) or 0.0
+    return evaluated.distance_nm <= max(settings.map_range_nm, radius_nm)
+
+
+def _in_radius(evaluated, settings, feed):
+    """Inside the radius, at any altitude. Aircraft with no position aren't counted."""
+    radius_nm = _judging_radius_nm(evaluated, settings, feed)
+    return evaluated.distance_nm is not None and radius_nm is not None and evaluated.distance_nm <= radius_nm
 
 
 def recent_events(events, event):
@@ -99,7 +112,6 @@ def build_status(
 ):
     aircraft = zone.aircraft if zone is not None else ()
     feed = feed_state.active_feed
-    radius_nm = settings.radius_nm_for(feed)
     return {
         "state": state,
         "reason": reason,
@@ -113,6 +125,8 @@ def build_status(
         ],
         "last_data_age_s": None if data_age_s is None else round(data_age_s, 1),
         "aircraft_in_zone": len(zone.in_zone) if zone is not None else 0,
+        "aircraft_in_radius": sum(1 for a in aircraft if _in_radius(a, settings, feed)),
+        "map_range": settings.map_range,
         "center": {"lat": settings.center_lat, "lon": settings.center_lon},
         "radius": {
             "value": settings.radius_for(feed),
@@ -124,7 +138,7 @@ def build_status(
         "aircraft": [
             _aircraft_entry(a, settings, feed)
             for a in aircraft
-            if _in_display_range(a, settings.radius_nm_for(FEED_ONLINE) if _online_only(a, feed) else radius_nm)
+            if _in_display_range(a, settings, feed)
         ],
         "fixtures": [
             {

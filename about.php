@@ -37,7 +37,7 @@
         <h6>With your receiver and online data together</h6>
         <ul>
             <li>Your receiver has priority. An aircraft it has located goes by your receiver radius, wherever online data puts that aircraft.</li>
-            <li>During a show, online data is also checked. An aircraft your receiver misses, or reports with no position, goes by the online data and online radius and can cause a blackout. The map and list mark it <code>receiver missed it</code>.</li>
+            <li>During a show, online data is also checked. An aircraft your receiver misses, or reports with no position, goes by the online data and online radius and can cause a blackout. The map circles it and the map and list mark it <code>receiver missed it</code>. The line under the map counts them.</li>
             <li>If online data stops while your receiver works, there's no blackout, but a warning says missed aircraft won't be caught.</li>
             <li>If your receiver stops, online data takes over with the online radius until the receiver returns.</li>
         </ul>
@@ -64,8 +64,11 @@
             <dt>The status page says NOT RUNNING</dt>
             <dd>SkyGuard's program has stopped, so the heads aren't protected. Restart FPPD. If it still says this, reboot. If it stops again, check the log.</dd>
 
-            <dt>A helicopter shows as a plane on the map</dt>
-            <dd>An aircraft shows as a helicopter only when it reports itself as one, and some don't. The shape is only for the map: helicopters and planes are treated the same for a blackout.</dd>
+            <dt>A helicopter shows as a round blip on the map</dt>
+            <dd>An aircraft shows as a helicopter (a diamond) only when it reports itself as one, and some don't. The shape is only for the map: helicopters and planes are treated the same for a blackout.</dd>
+
+            <dt>Reading the status map</dt>
+            <dd>The status map is a radar scope with your map faint underneath. Each aircraft is a blip: green normally, red in the zone, grey on the ground and ignored. The short line from a blip points where it is heading. An orange ring means only online data saw it, so your receiver missed it. The rings are distances from your center out to the Map range, and the legend under the map lists each one.</dd>
 
             <dt>The plane icon at the top of FPP looks out of date</dt>
             <dd>Hover over it to see whether SkyGuard is on or off, and what it's doing. FPP refreshes this icon on its own schedule, so it can take about 30 seconds to catch up after a change. The status page is always current. Green means on and all is well, yellow means off or a warning, and red means blacked out or not running.</dd>
@@ -75,6 +78,9 @@
 
             <dt>No aircraft on the map, but the online Test finds some</dt>
             <dd>The Test makes its own request. The map uses SkyGuard's regular polling, which asks for online data only during a show, and never while SkyGuard is disabled. To see aircraft between shows, turn on "Check online data between shows" under Advanced in SkyGuard Settings.</dd>
+
+            <dt>Aircraft I expect aren't on the map</dt>
+            <dd>The map shows aircraft out to the Map range on the Location &amp; Zone tab, 25 miles unless you changed it. Raise it to see further; it changes only the map and list, never what blacks out. The line under the map says how many aircraft are inside your radius right now.</dd>
 
             <dt>The map shows a radar plot instead</dt>
             <dd>Map images couldn't load, usually because this device or your browser can't reach the internet. The plot uses the same data. An empty map address under Advanced also gives you the plot.</dd>
