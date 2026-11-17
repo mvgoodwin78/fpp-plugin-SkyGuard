@@ -368,8 +368,11 @@ def _band_value(read, key, legacy_key, default):
 def _altitude_band(read, prefix, label):
     floor = _band_value(read, f"{prefix}_alt_floor_ft", "alt_floor_ft", Zone.alt_floor_ft)
     ceiling = _band_value(read, f"{prefix}_alt_ceiling_ft", "alt_ceiling_ft", Zone.alt_ceiling_ft)
-    if floor > ceiling:
-        read.warnings.append(f"{label}: the lowest altitude is above the highest, so 0 to 10,000 feet is used.")
+    # Equal limits leave no room for an aircraft (0 to 0 counts nothing), so they're refused
+    # like reversed ones: falling back to the default band keeps the zone protecting.
+    if floor >= ceiling:
+        problem = "is above" if floor > ceiling else "is the same as"
+        read.warnings.append(f"{label}: the lowest altitude {problem} the highest, so 0 to 10,000 feet is used.")
         return Zone.alt_floor_ft, Zone.alt_ceiling_ft
     return floor, ceiling
 

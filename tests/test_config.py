@@ -114,6 +114,14 @@ class SettingsValidationTests(unittest.TestCase):
         self.assertEqual((zone.alt_floor_ft, zone.alt_ceiling_ft), (0.0, 10000.0))
         self.assertTrue(s.warnings)
 
+    def test_a_ceiling_equal_to_the_floor_uses_the_default_band(self):
+        # A highest altitude of 0 with the lowest at 0 would count no aircraft at all.
+        s = load_settings({"zone1_north": "3", "zone1_south": "3", "zone1_east": "3", "zone1_west": "3",
+                           "zone1_alt_ceiling_ft": "0"})
+        zone = s.zone("receiver1")
+        self.assertEqual((zone.alt_floor_ft, zone.alt_ceiling_ft), (0.0, 10000.0))
+        self.assertTrue(any("same as the highest" in w for w in s.warnings), s.warnings)
+
     def test_an_online_zone_beyond_the_online_cap_warns(self):
         self.assertTrue(load_settings({"radius": "200", "radius_unit": "nm"}).warnings)
 

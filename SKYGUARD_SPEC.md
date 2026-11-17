@@ -494,7 +494,7 @@ Every setting below lives in `config/plugin.fpp-plugin-SkyGuard` except the fixt
 | `online_zone_north` … `online_zone_west` | none | The online zone, 0–250 each. User must enter them when online data is in use |
 | `radius_unit` | mi | `mi`, `nm`, `km`. The distance unit for every zone and the map range |
 | `map_range` | 25 | 1–250, in the distance unit. How far out the map and list show aircraft; the status map's view fits it. Display only: blackouts use the zones |
-| `<zone>_alt_floor_ft` / `<zone>_alt_ceiling_ft` | 0 / 10000 | Per zone (`zone1`, `zone2`, `online_zone`). Heights above the show, inclusive; a floor of 0 or less means no floor; a floor above the ceiling uses the default band with a warning |
+| `<zone>_alt_floor_ft` / `<zone>_alt_ceiling_ft` | 0 / 10000 | Per zone (`zone1`, `zone2`, `online_zone`). Heights above the show, inclusive; a floor of 0 or less means no floor; a floor at or above the ceiling uses the default band with a warning |
 | `show_elevation_ft` | 0 | The show's ground elevation above sea level, −1500 to 15000. Look it up sends the saved center point to api.open-meteo.com (Copernicus DEM, 90 m) once, only when pressed. 0 measures from sea level |
 | `count_no_position` | true | Aircraft with altitude but no position count as in zone |
 | `ignore_ground` | false | Skip aircraft on the ground; see Ignoring ground traffic |
