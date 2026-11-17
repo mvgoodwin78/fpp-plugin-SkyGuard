@@ -28,12 +28,17 @@ _logger = logging.getLogger(LOGGER_NAME)
 
 
 def atomic_write_json(path, doc):
+    atomic_write_text(path, json.dumps(doc))
+
+
+def atomic_write_text(path, text):
+    """Replace a file all at once, so a reader never sees half of one."""
     directory = os.path.dirname(path)
     os.makedirs(directory, exist_ok=True)
     handle, temp_path = tempfile.mkstemp(dir=directory, prefix=".skyguard-")
     try:
         with os.fdopen(handle, "w", encoding="utf-8") as output:
-            json.dump(doc, output)
+            output.write(text)
         os.chmod(temp_path, 0o644)
         os.replace(temp_path, path)
     except OSError:

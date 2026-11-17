@@ -13,7 +13,7 @@ import tempfile
 import time
 import unittest
 
-from skyguard.config import Paths, Settings
+from skyguard.config import SIDES, ZONE_KEYS, Paths, Settings, Zone
 from skyguard.matrix import SAMPLE_VALUES
 from skyguard.feeds.online_adsbx_v2 import PROVIDERS
 from skyguard.fpp_api import FppApi
@@ -397,6 +397,8 @@ class PhpTests(unittest.TestCase):
 
     def test_every_setting_on_the_page_is_one_the_daemon_knows(self):
         known = set(Settings.__dataclass_fields__) | {"units", "setup_state", "map_tile_url"}
+        known |= {f"{prefix}_{side}" for _id, prefix, _feed, _label in ZONE_KEYS for side in SIDES}
+        known |= {f"{prefix}_{limit}" for _id, prefix, _feed, _label in ZONE_KEYS for limit in ("alt_floor_ft", "alt_ceiling_ft")}
         page = read("content.php") + read("assets/skyguard-settings.js")
         names = set(re.findall(r"skyGuardNumber\('(\w+)'", page))
         names |= set(re.findall(r"skyGuard(?:Select|Checkbox)\('[^']*', '(\w+)'", page))
@@ -411,6 +413,9 @@ class PhpTests(unittest.TestCase):
         shown = re.findall(r"skyGuardNumber\('(\w+)', [-\d.]+, [-\d.]+, '([^']*)'(?:, '[^']*')?\)", page)
         self.assertGreater(len(shown), 8)
         for name, value in shown:
+            if name.endswith(("_alt_floor_ft", "_alt_ceiling_ft")):
+                self.assertEqual(float(value), getattr(Zone, "alt_" + name.split("_alt_")[1]), name)
+                continue
             self.assertEqual(float(value), float(getattr(defaults, name)), name)
         checks = re.findall(r"skyGuardCheckbox\('[^']*', '(\w+)', (\d)\)", page)
         self.assertGreater(len(checks), 2)
@@ -421,10 +426,15 @@ class PhpTests(unittest.TestCase):
             if name != "units":
                 self.assertEqual(value, getattr(defaults, name), name)
 
-    def test_the_radius_fields_have_no_default(self):
+    def test_the_zone_distances_have_no_default(self):
         page = read("content.php")
-        self.assertIn("skyGuardNumber('radius', 0.01, 99999)", page)
-        self.assertIn("skyGuardNumber('radius_receiver', 0.01, 99999)", page)
+        self.assertIn("skyGuardNumber($setting, 0, 250);", page)
+        for _id, prefix, _feed, _label in ZONE_KEYS:
+            self.assertIn(f"skyGuardZone('{prefix}', ", page)
+        for side in SIDES:
+            self.assertIn(f"skyGuardZoneDistance($prefix . '_{side}', '{side.title()}')", page)
+        self.assertNotIn("'radius'", page)
+        self.assertNotIn("'radius_receiver'", page)
 
     def test_the_fixture_list_get_writes_nothing(self):
         body = self.api.split("function fppPluginSkyGuardFixtureList(")[1].split("\nfunction ")[0]

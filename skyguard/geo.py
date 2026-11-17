@@ -30,3 +30,26 @@ def haversine_nm(lat1, lon1, lat2, lon2):
     a = math.sin(d_phi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(d_lambda / 2) ** 2
     # Rounding can push `a` just past 1 for antipodal points, which would fail in asin.
     return 2 * EARTH_RADIUS_NM * math.asin(math.sqrt(min(1.0, a)))
+
+
+def offset_nm(center_lat, center_lon, lat, lon):
+    """How far a point is north and east of the center, in nautical miles; negative is south
+    or west. A flat-earth approximation, which is well within a poll's movement at the
+    distances a zone covers. Longitude wraps, so a zone can cross the 180th meridian."""
+    d_lon = (lon - center_lon + 180.0) % 360.0 - 180.0
+    mid_lat = math.radians((lat + center_lat) / 2)
+    north = math.radians(lat - center_lat) * EARTH_RADIUS_NM
+    east = math.radians(d_lon) * EARTH_RADIUS_NM * math.cos(mid_lat)
+    return north, east
+
+
+def in_box(north_nm, east_nm, bounds_nm):
+    """Whether an offset is inside a box given as (north, south, east, west) reaches, edges included."""
+    north, south, east, west = bounds_nm
+    return -south <= north_nm <= north and -west <= east_nm <= east
+
+
+def zone_reach_nm(bounds_nm):
+    """The distance from the center to a box's farthest corner."""
+    north, south, east, west = bounds_nm
+    return math.hypot(max(north, south), max(east, west))

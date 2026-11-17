@@ -44,6 +44,15 @@ LOOP_TICK_S = 0.1
 _logger = logging.getLogger(LOGGER_NAME)
 
 
+def _query_reach_nm(settings):
+    """How far online queries reach: twice the online zone's farthest corner, so the map has
+    what is approaching, and at least the map range. None without an online zone."""
+    reach = settings.online_reach_nm
+    if reach is None:
+        return None
+    return max(reach * DISPLAY_RANGE_RADII, settings.map_range_nm)
+
+
 @dataclass(frozen=True)
 class FeedState:
     active_feed: str
@@ -137,7 +146,7 @@ class FeedManager:
         return (
             settings.enabled
             and settings.center_set
-            and settings.radius is not None
+            and settings.online_reach_nm is not None
             and settings.personal_use_confirmed
             and (self._in_schedule or settings.online_between_shows)
         )
@@ -173,7 +182,7 @@ class FeedManager:
             settings.online_provider,
             settings.center_lat,
             settings.center_lon,
-            max(settings.radius_nm * DISPLAY_RANGE_RADII, settings.map_range_nm),
+            _query_reach_nm(settings),
             self._fetch,
         )
 
@@ -221,12 +230,12 @@ class FeedManager:
                 old.online_provider,
                 old.center_lat,
                 old.center_lon,
-                old.radius_nm,
+                _query_reach_nm(old),
             ) != (
                 settings.online_provider,
                 settings.center_lat,
                 settings.center_lon,
-                settings.radius_nm,
+                _query_reach_nm(settings),
             )
             if receiver_changed:
                 self._reset_receiver_tracking()

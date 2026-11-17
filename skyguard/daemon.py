@@ -26,11 +26,12 @@ from .matrix import MatrixController
 from .notifier import LOGGER_NAME, LogSink, Notifier, RepeatLimiter, WarningSink
 from .overlay import ChannelResolver, Ledger, OverlayController, blackout_target
 from .status import StatusWriter, build_status, load_events, recent_events
+from .visits import VisitLog
 from .config import FEED_ONLINE, FEED_RECEIVER
 from .trigger import BLACKOUT, IDLE, Inputs, TriggerEngine, evaluate_zone, merge_zones, split_cross_check
 
 ONLINE_LAG_NOTICE = (
-    "Online flight data can lag behind real aircraft. Increase your radius by 3 miles to allow for it."
+    "Online flight data can lag behind real aircraft. Make your online zone 3 miles larger on every side to allow for it."
 )
 STEP_TICK_S = 0.25
 SETTING_RETRY_S = 5.0
@@ -90,6 +91,7 @@ class Daemon:
         self.status_writer = StatusWriter(paths.status_file, clock)
         self.fpp_watch = FppWatcher(ShowDetector(api, clock), self.resolver, clock)
         self._events = load_events(paths.status_file)
+        self.visits = VisitLog(paths.zone_log_file, clock, wall_clock)
 
         self._in_schedule = False
         self._pending_enabled = None
@@ -127,7 +129,7 @@ class Daemon:
 
         self.notifier.emit("plugin_enabled" if settings.enabled else "plugin_disabled")
         self.notifier.emit("center_set" if settings.center_set else "center_unset")
-        self.notifier.emit("radius_set" if settings.radius_ready else "radius_unset")
+        self.notifier.emit("zone_set" if settings.zones_ready else "zone_unset")
         needs_confirmation = settings.enabled and not settings.personal_use_confirmed
         self.notifier.emit("personal_use_required" if needs_confirmation else "personal_use_confirmed")
         if settings.uses_online and not self._lag_notice_logged:
@@ -198,17 +200,15 @@ class Daemon:
 
     def _evaluate(self, feed_state):
         settings = self.settings
-        if not settings.center_set or not settings.radius_ready:
+        if not settings.center_set or not settings.zones_ready:
             return None
 
-        def judge(records, radius_nm):
+        def judge(records, zones):
             return evaluate_zone(
                 records,
                 settings.center_lat,
                 settings.center_lon,
-                radius_nm,
-                settings.alt_floor_ft,
-                settings.alt_ceiling_ft,
+                zones,
                 settings.count_no_position,
                 ignore_ground=settings.ignore_ground,
                 ground_speed_limit_kt=settings.ground_speed_limit_kt,
@@ -218,14 +218,14 @@ class Daemon:
         seen, missed = split_cross_check(feed_state.aircraft, feed_state.cross_check)
         if feed_state.active_feed == FEED_RECEIVER:
             # Just after the receiver takes over again, the aircraft in hand can still be the
-            # online feed's. Online data goes by the online radius, whichever feed is in use.
+            # online feed's. Online data goes by the online zone, whichever feed is in use.
             leftover = tuple(record for record in seen if record.source.startswith("online"))
             if leftover:
                 seen = tuple(record for record in seen if not record.source.startswith("online"))
                 missed = missed + leftover
-        zone = judge(seen, settings.radius_nm_for(feed_state.active_feed))
+        zone = judge(seen, settings.zones_for(feed_state.active_feed))
         if missed:
-            zone = merge_zones(zone, judge(missed, settings.radius_nm_for(FEED_ONLINE)))
+            zone = merge_zones(zone, judge(missed, settings.zones_for(FEED_ONLINE)))
         return zone
 
     def _log_transition(self, transition):
@@ -293,16 +293,17 @@ class Daemon:
         settings = self.settings
         feed_state = self.feed.state()
         zone = self._evaluate(feed_state)
+        data_fresh = self.feed.data_fresh(now)
         in_zone = tuple(a.record for a in zone.in_zone) if zone else ()
         transition = self.engine.update(
             now,
             Inputs(
                 enabled=settings.enabled,
                 center_set=settings.center_set,
-                radius_set=settings.radius_ready,
+                zone_set=settings.zones_ready,
                 personal_use_confirmed=settings.personal_use_confirmed,
                 in_schedule=self._in_schedule,
-                data_fresh=self.feed.data_fresh(now),
+                data_fresh=data_fresh,
                 aircraft=in_zone,
             ),
         )
@@ -318,6 +319,7 @@ class Daemon:
 
         self._request_matrix(zone, in_zone)
         self._log_skips(zone, feed_state)
+        self.visits.update(zone, data_fresh)
         self._write_status(now, feed_state, zone, resolved)
 
     def _report_fixture_setup(self, settings, target):
@@ -382,6 +384,7 @@ class Daemon:
                 message_test=self._message_test,
                 events=self._events,
                 held_channels=sorted(self.overlay.held),
+                visits_open=self.visits.open_visits(),
             )
         )
 
@@ -454,6 +457,10 @@ class Daemon:
             self.matrix.clear_all()
         except Exception:
             _logger.exception("Could not clear the matrix message")
+        try:
+            self.visits.close_all()
+        except Exception:
+            _logger.exception("Could not save the open zone visits")
         _logger.info("SkyGuard daemon stopped; channels released: %s", released)
 
 

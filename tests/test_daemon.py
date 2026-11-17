@@ -535,13 +535,13 @@ class OnlineCheckTests(unittest.TestCase):
         self.assertTrue(entry["online_only"])
         self.assertTrue(entry["in_zone"])
 
-    def test_the_radius_count_judges_each_aircraft_by_its_own_radius(self):
-        # Seen by both at 6.9 mi: outside the 5 mi receiver radius. Missed at 6.9 mi: inside
-        # the 10 mi online radius that judges it. Near: inside either.
+    def test_the_area_count_judges_each_aircraft_by_its_own_zone(self):
+        # Seen by both at 6.9 mi: outside the 5 mi receiver zone. Missed at 6.9 mi: inside
+        # the 10 mi online zone that judges it. Near: inside either.
         missed = plane({**self.BETWEEN, "hex": "b2"})
         self.feeds([plane(self.BETWEEN), plane({**self.NEAR, "hex": "c3"})],
                    [plane(self.BETWEEN), missed, plane({**self.NEAR, "hex": "c3"})])
-        self.assertEqual(self.r.status()["aircraft_in_radius"], 2)
+        self.assertEqual(self.r.status()["aircraft_in_area"], 2)
 
     def test_seen_by_both_outside_the_receiver_radius_does_not_black_out(self):
         self.feeds([plane(self.BETWEEN)], [plane(self.BETWEEN)])
@@ -1296,8 +1296,11 @@ class StatusAcceptanceTests(unittest.TestCase):
             "receiver_ok",
             "last_data_age_s",
             "aircraft_in_zone",
+            "aircraft_in_area",
             "center",
-            "radius",
+            "unit",
+            "zones",
+            "visits_open",
             "aircraft",
             "fixtures",
             "warnings",
@@ -1314,7 +1317,11 @@ class StatusAcceptanceTests(unittest.TestCase):
         self.assertEqual(status["active_feed"], "receiver")
         self.assertEqual(status["aircraft_in_zone"], 1)
         self.assertEqual(status["center"], {"lat": 40.0, "lon": -75.0})
-        self.assertEqual(status["radius"], {"value": 10.0, "unit": "mi", "online": 10.0, "receiver": 10.0})
+        self.assertEqual(status["unit"], "mi")
+        self.assertEqual(
+            [(z["id"], z["north"], z["south"], z["east"], z["west"], z["active"], z["aircraft_in_zone"]) for z in status["zones"]],
+            [("receiver1", 10.0, 10.0, 10.0, 10.0, True, 1), ("online", 10.0, 10.0, 10.0, 10.0, False, 0)],
+        )
         self.assertEqual(status["updated_at"], self.r.wall)
 
     def test_aircraft_entries(self):
@@ -1330,8 +1337,8 @@ class StatusAcceptanceTests(unittest.TestCase):
     def test_aircraft_beyond_the_display_range_are_left_out(self):
         self.assertEqual([a["hex"] for a in self.r.status()["aircraft"]], ["a1"])
 
-    def test_aircraft_between_radius_and_display_range_are_listed_but_not_in_zone(self):
-        self.r.aircraft = [plane({"lat": 40.2, "lon": -75.0})]  # about 13.8 mi; radius is 10
+    def test_aircraft_between_the_zone_and_the_map_range_are_listed_but_not_in_zone(self):
+        self.r.aircraft = [plane({"lat": 40.2, "lon": -75.0})]  # about 13.8 mi north; the zone reaches 10
         self.r.tick()
         status = self.r.status()
         self.assertEqual(len(status["aircraft"]), 1)

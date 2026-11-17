@@ -2,7 +2,7 @@ import unittest
 from dataclasses import replace
 
 from skyguard.feeds.base import GROUND, AircraftRecord
-from skyguard.geo import haversine_nm
+from skyguard.geo import haversine_nm, offset_nm
 from skyguard.trigger import (
     BLACKOUT,
     CLEAR,
@@ -20,6 +20,8 @@ from skyguard.trigger import (
     data_is_fresh,
     evaluate_zone,
 )
+from skyguard.config import Zone
+from tests.zones import box
 
 CENTER = (40.0, -75.0)
 RADIUS_NM = 10.0
@@ -34,7 +36,7 @@ def plane(hex="a1", position=INSIDE, alt=3000):
 
 
 def evaluate(records, floor=0.0, ceiling=10000.0, count_no_position=True, radius=RADIUS_NM):
-    return evaluate_zone(records, CENTER[0], CENTER[1], radius, floor, ceiling, count_no_position)
+    return evaluate_zone(records, CENTER[0], CENTER[1], (box(radius, floor, ceiling),), count_no_position)
 
 
 class DistanceRuleTests(unittest.TestCase):
@@ -50,9 +52,16 @@ class DistanceRuleTests(unittest.TestCase):
     def test_outside_radius(self):
         self.assertEqual(evaluate([plane(position=OUTSIDE)]).in_zone, ())
 
-    def test_exactly_on_the_radius_counts(self):
-        distance = haversine_nm(*CENTER, *INSIDE)
-        self.assertEqual(len(evaluate([plane()], radius=distance).in_zone), 1)
+    def test_exactly_on_the_edge_counts(self):
+        north, _east = offset_nm(*CENTER, *INSIDE)
+        self.assertEqual(len(evaluate([plane()], radius=north).in_zone), 1)
+        self.assertEqual(evaluate([plane()], radius=north - 0.01).in_zone, ())
+
+    def test_a_corner_of_the_box_counts_where_a_circle_would_not(self):
+        # About 8.5 nm out to the north-east: outside a 6.5 nm circle, inside a 6.5 nm box.
+        corner = (40.1, -74.87)
+        self.assertGreater(haversine_nm(*CENTER, *corner), 6.5)
+        self.assertEqual(len(evaluate([plane(position=corner)], radius=6.5).in_zone), 1)
 
     def test_distance_is_reported(self):
         result = evaluate([plane()])
@@ -450,3 +459,62 @@ class ResumeAfterCrashTests(EngineTestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+def zone(zone_id, north, south, east, west, floor=0.0, ceiling=10000.0):
+    return Zone(zone_id, "receiver", zone_id, north, south, east, west, floor, ceiling, "nm")
+
+
+def judge(records, *zones, count_no_position=True):
+    return evaluate_zone(records, CENTER[0], CENTER[1], zones, count_no_position)
+
+
+class BoxZoneTests(unittest.TestCase):
+    """Each zone is a box reaching its own distance north, south, east and west of center."""
+
+    NORTH_6 = (40.1, -75.0)  # about 6 nm north
+    SOUTH_6 = (39.9, -75.0)
+    EAST_6 = (40.0, -74.8695)  # about 6 nm east
+    WEST_6 = (40.0, -75.1305)
+
+    def test_each_side_has_its_own_distance(self):
+        lopsided = zone("receiver1", 2, 8, 8, 2)
+        cases = {self.NORTH_6: False, self.SOUTH_6: True, self.EAST_6: True, self.WEST_6: False}
+        for position, expected in cases.items():
+            with self.subTest(position=position):
+                self.assertEqual(judge([plane(position=position)], lopsided).aircraft[0].in_zone, expected)
+
+    def test_a_zone_can_be_entirely_to_one_side(self):
+        north_only = zone("receiver1", 10, 0, 3, 3)
+        self.assertTrue(judge([plane(position=self.NORTH_6)], north_only).aircraft[0].in_zone)
+        self.assertFalse(judge([plane(position=self.SOUTH_6)], north_only).aircraft[0].in_zone)
+
+    def test_each_zone_has_its_own_altitude_band(self):
+        low = zone("receiver1", 10, 10, 10, 10, ceiling=2000)
+        high = zone("receiver2", 10, 0, 10, 10, floor=2500, ceiling=8000)
+        result = judge([plane("a", alt=1000), plane("b", alt=3000), plane("c", alt=9000)], low, high)
+        self.assertEqual([a.zones for a in result.aircraft], [("receiver1",), ("receiver2",), ()])
+        self.assertEqual([a.record.hex for a in result.in_zone], ["a", "b"])
+
+    def test_inside_two_zones_lists_both(self):
+        first = zone("receiver1", 10, 10, 10, 10)
+        second = zone("receiver2", 10, 0, 10, 10)
+        self.assertEqual(judge([plane()], first, second).aircraft[0].zones, ("receiver1", "receiver2"))
+
+    def test_inside_a_box_but_outside_its_band_is_in_the_area_only(self):
+        result = judge([plane(alt=12000)], zone("receiver1", 10, 10, 10, 10))
+        self.assertTrue(result.aircraft[0].in_area)
+        self.assertFalse(result.aircraft[0].in_zone)
+
+    def test_no_position_counts_if_any_zones_band_passes(self):
+        low = zone("receiver1", 10, 10, 10, 10, ceiling=2000)
+        high = zone("receiver2", 10, 10, 10, 10, floor=5000, ceiling=8000)
+        records = [plane("a", position=None, alt=6000), plane("b", position=None, alt=3000)]
+        result = judge(records, low, high)
+        self.assertEqual([a.record.hex for a in result.in_zone], ["a"])
+        self.assertEqual(result.in_zone[0].zones, ())
+
+    def test_a_zone_across_the_180th_meridian(self):
+        north, east = offset_nm(0.0, 179.95, 0.0, -179.95)
+        self.assertAlmostEqual(north, 0.0)
+        self.assertAlmostEqual(east, 6.0, delta=0.05)

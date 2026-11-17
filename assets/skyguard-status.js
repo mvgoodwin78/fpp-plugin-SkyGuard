@@ -20,7 +20,7 @@
         disabled: 'SkyGuard is disabled.',
         not_confirmed: 'Waiting for the personal use confirmation in SkyGuard Settings.',
         no_center: 'Waiting for a center point in SkyGuard Settings.',
-        no_radius: 'Waiting for a radius in SkyGuard Settings.',
+        no_zone: 'Waiting for a zone in SkyGuard Settings.',
         resume: 'Held dark after a restart, until fresh data arrives.',
         clear: 'No aircraft in the zone.'
     };
@@ -215,7 +215,7 @@
     function showList(status) {
         var aircraft = status.aircraft || [];
         var body = byId('skyGuardListRows');
-        var radiusUnit = (status.radius || {}).unit;
+        var radiusUnit = status.unit;
         byId('skyGuardListOpen').textContent = 'Aircraft list (' + aircraft.length + ')';
         byId('skyGuardListEmpty').hidden = aircraft.length > 0;
         body.replaceChildren();
@@ -231,22 +231,33 @@
         });
     }
 
-    /* One line under the map: how many aircraft are inside the radius in use, how far the map
+    /* One line under the map: how many aircraft are inside the zones in use, how far the map
        reaches, and how many only the online check saw. */
     function showRadiusCount(status) {
         var line = byId('skyGuardRadiusCount');
-        var radius = status.radius || {};
-        if (typeof radius.value !== 'number' || !status.center || typeof status.center.lat !== 'number') {
+        var inUse = (status.zones || []).filter(function (zone) {
+            return zone.active;
+        });
+        if (!inUse.length || !status.center || typeof status.center.lat !== 'number') {
             line.textContent = '';
             return;
         }
-        var inRadius = status.aircraft_in_radius || 0;
+        var inArea = status.aircraft_in_area || 0;
         var inZone = status.aircraft_in_zone || 0;
-        var which = status.active_feed === 'receiver' ? 'receiver' : 'online';
-        var text = 'Within your ' + radius.value + ' ' + radius.unit + ' ' + which + ' radius: ' +
-            inRadius + ' aircraft, ' + inZone + ' in the zone (radius and altitude).';
+        var names = inUse.map(function (zone) {
+            return zone.label.toLowerCase();
+        }).join(' and ');
+        var text = 'Inside your ' + names + ': ' + inArea + ' aircraft, ' + inZone +
+            ' in the zone (inside the box and within its altitudes).';
+        var noPosition = (status.aircraft || []).filter(function (plane) {
+            return plane.in_zone && typeof plane.lat !== 'number';
+        }).length;
+        if (noPosition) {
+            text += ' ' + noPosition + ' of those ' + (noPosition === 1 ? 'has' : 'have') +
+                ' no position and ' + (noPosition === 1 ? 'counts' : 'count') + ' because "Count aircraft with no position" is on.';
+        }
         if (typeof status.map_range === 'number') {
-            text += ' The map shows aircraft up to ' + status.map_range + ' ' + radius.unit + ' out.';
+            text += ' The map shows aircraft up to ' + status.map_range + ' ' + status.unit + ' out.';
         }
         var missed = (status.aircraft || []).filter(function (plane) {
             return plane.online_only;
@@ -287,7 +298,130 @@
             note.textContent = 'No aircraft are shown, because the newest data is ' + Math.round(age / 60) +
                 ' minutes old.' + (status.enabled ? '' : ' SkyGuard does not request online data while it is disabled.');
         }
-        return Object.assign({}, status, { aircraft: [], aircraft_in_zone: 0, aircraft_in_radius: 0 });
+        return Object.assign({}, status, { aircraft: [], aircraft_in_zone: 0, aircraft_in_area: 0, visits_open: [] });
+    }
+
+    /* ---- the zone log ---- */
+
+    var VISIT_REFRESH_MS = 30000;
+    var VISIT_ROWS = 100;
+    var ZONE_LABELS = { receiver1: 'Receiver zone 1', receiver2: 'Receiver zone 2', online: 'Online zone' };
+    var loggedVisits = [];
+    var openCount = 0;
+
+    function visitAltitude(value) {
+        if (value === 'ground') {
+            return 'Ground';
+        }
+        if (typeof value !== 'number') {
+            return '?';
+        }
+        return units === 'metric' ? Math.round(value * 0.3048).toLocaleString() + ' m' : value.toLocaleString() + ' ft';
+    }
+
+    function duration(seconds) {
+        seconds = Math.max(0, Math.round(seconds || 0));
+        if (seconds < 60) {
+            return seconds + ' s';
+        }
+        var minutes = Math.floor(seconds / 60);
+        if (minutes < 60) {
+            return minutes + ' min ' + (seconds % 60) + ' s';
+        }
+        return Math.floor(minutes / 60) + ' h ' + (minutes % 60) + ' min';
+    }
+
+    function feedName(source) {
+        return String(source || '').indexOf('online') === 0 ? 'Online' : 'Receiver';
+    }
+
+    function showVisits(status) {
+        var body = byId('skyGuardVisits');
+        var zone = byId('skyGuardVisitZone').value;
+        var open = ((status && status.visits_open) || []).slice().reverse().map(function (visit) {
+            return Object.assign({ inside: true }, visit);
+        });
+        var rows = open.concat(loggedVisits).filter(function (visit) {
+            return !zone || visit.zone === zone;
+        }).slice(0, VISIT_ROWS);
+        body.replaceChildren();
+        if (!rows.length) {
+            var empty = document.createElement('tr');
+            cell(empty, 'No aircraft have passed through ' + (zone ? 'this zone' : 'a zone') + ' yet.', 'text-body-secondary').colSpan = 6;
+            body.appendChild(empty);
+            return;
+        }
+        rows.forEach(function (visit) {
+            var row = document.createElement('tr');
+            cell(row, ZONE_LABELS[visit.zone] || visit.zone);
+            cell(row, visit.callsign || visit.hex || 'Unknown');
+            cell(row, new Date(visit.entered * 1000).toLocaleString());
+            var time = cell(row, duration(visit.seconds));
+            if (visit.inside) {
+                time.appendChild(document.createTextNode(' '));
+                time.appendChild(badge('inside now', 'text-bg-danger'));
+            }
+            cell(row, visitAltitude(visit.alt_entry_ft) + ' / ' + visitAltitude(visit.alt_min_ft) + ' / ' + visitAltitude(visit.alt_max_ft));
+            cell(row, feedName(visit.source));
+            body.appendChild(row);
+        });
+    }
+
+    function loadVisits() {
+        return request('GET', API + 'visits?limit=' + VISIT_ROWS).then(function (doc) {
+            loggedVisits = doc.visits || [];
+            showVisits(last);
+        }).catch(function () {
+            /* The next refresh tries again. */
+        });
+    }
+
+    /* A spreadsheet opens a cell starting with one of these as a formula, and callsigns come from outside. */
+    function csvField(value) {
+        var text = value === null || value === undefined ? '' : String(value);
+        if (/^[=+\-@\t\r]/.test(text)) {
+            text = "'" + text;
+        }
+        return /[",\r\n]/.test(text) ? '"' + text.replace(/"/g, '""') + '"' : text;
+    }
+
+    function isoTime(seconds) {
+        return typeof seconds === 'number' ? new Date(seconds * 1000).toISOString() : '';
+    }
+
+    function downloadVisits() {
+        request('GET', API + 'visits?limit=all').then(function (doc) {
+            var lines = [['zone', 'callsign', 'hex', 'entered_utc', 'left_utc', 'seconds_inside',
+                'altitude_in_ft', 'altitude_low_ft', 'altitude_high_ft', 'data'].join(',')];
+            (doc.visits || []).slice().reverse().forEach(function (visit) {
+                lines.push([ZONE_LABELS[visit.zone] || visit.zone, visit.callsign, visit.hex, isoTime(visit.entered),
+                    isoTime(visit.left), visit.seconds, visit.alt_entry_ft, visit.alt_min_ft, visit.alt_max_ft,
+                    feedName(visit.source)].map(csvField).join(','));
+            });
+            var blob = new Blob([lines.join('\r\n') + '\r\n'], { type: 'text/csv' });
+            var link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'skyguard-zone-log.csv';
+            document.body.appendChild(link);
+            link.click();
+            link.remove();
+            setTimeout(function () {
+                URL.revokeObjectURL(link.href);
+            }, 1000);
+        }).catch(showError);
+    }
+
+    function setupVisits() {
+        byId('skyGuardVisitZone').addEventListener('change', function () {
+            showVisits(last);
+        });
+        byId('skyGuardVisitCsv').addEventListener('click', downloadVisits);
+        loadVisits();
+        setInterval(function () {
+            if (!document.hidden) {
+                loadVisits();
+            }
+        }, VISIT_REFRESH_MS);
     }
 
     function refresh() {
@@ -302,6 +436,13 @@
             showEvents(status);
             showList(status);
             showRadiusCount(status);
+            /* A visit that just ended is in the file now, not the status. */
+            var open = (status.visits_open || []).length;
+            if (open < openCount) {
+                loadVisits();
+            }
+            openCount = open;
+            showVisits(status);
             if (map) {
                 map.update(status);
             }
@@ -370,6 +511,7 @@
         }
         setupControls();
         setupList();
+        setupVisits();
         Promise.all([readSetting('units'), readSetting('map_tile_url'), readSetting('online_provider'), readSetting('online_idle_interval_s'),
             readSetting('online_between_shows')]).then(function (results) {
             units = results[0] === 'metric' ? 'metric' : 'imperial';

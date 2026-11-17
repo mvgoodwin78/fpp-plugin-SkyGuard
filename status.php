@@ -35,6 +35,24 @@
     </div>
     <div class="form-text" id="skyGuardNotices"></div>
 
+    <h5 class="mt-3">Zone log</h5>
+    <div class="form-text mb-2">Every aircraft that passed through a zone: inside the box and within that zone's altitudes, whether or not a show was running. Kept for 90 days.</div>
+    <div class="d-flex flex-wrap align-items-center gap-2 mb-2">
+        <select class="form-select form-select-sm w-auto" id="skyGuardVisitZone" aria-label="Zone to show">
+            <option value="">All zones</option>
+            <option value="receiver1">Receiver zone 1</option>
+            <option value="receiver2">Receiver zone 2</option>
+            <option value="online">Online zone</option>
+        </select>
+        <button type="button" class="btn btn-sm btn-secondary" id="skyGuardVisitCsv">Download CSV</button>
+    </div>
+    <div class="table-responsive skyguard-visit-table">
+        <table class="table table-sm align-middle">
+            <thead><tr><th>Zone</th><th>Callsign</th><th>Entered</th><th>Time inside</th><th>Altitude in / low / high</th><th>Data</th></tr></thead>
+            <tbody id="skyGuardVisits"></tbody>
+        </table>
+    </div>
+
     <h5 class="mt-3">Recent events</h5>
     <div class="table-responsive">
         <table class="table table-sm align-middle">

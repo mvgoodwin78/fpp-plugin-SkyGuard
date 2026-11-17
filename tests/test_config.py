@@ -49,8 +49,8 @@ class SettingsDefaultsTests(unittest.TestCase):
         self.assertEqual(s.health_interval_s, 10.0)
         self.assertEqual(s.health_fail_count, 2)
         self.assertEqual(s.max_data_age_s, 5.0)
-        self.assertEqual((s.radius, s.radius_receiver, s.radius_unit), (None, None, "mi"))
-        self.assertEqual((s.alt_floor_ft, s.alt_ceiling_ft), (0.0, 10000.0))
+        self.assertEqual((s.zones, s.radius_unit), ((), "mi"))
+        self.assertFalse(s.zone2_enabled)
         self.assertTrue(s.count_no_position)
         self.assertEqual(s.release_delay_s, 5.0)
         self.assertFalse(s.matrix_enabled)
@@ -64,14 +64,16 @@ class SettingsDefaultsTests(unittest.TestCase):
 
 class SettingsValidationTests(unittest.TestCase):
     def test_values_are_typed(self):
-        s = load_settings({"enabled": "0", "radius": "12.5", "radius_unit": "km", "health_fail_count": "3"})
+        s = load_settings({"enabled": "0", "zone1_north": "12.5", "zone1_south": "1", "zone1_east": "1",
+                           "zone1_west": "1", "radius_unit": "km", "health_fail_count": "3"})
         self.assertFalse(s.enabled)
-        self.assertEqual(s.radius, 12.5)
+        self.assertEqual(s.zone("receiver1").north, 12.5)
         self.assertEqual(s.radius_unit, "km")
         self.assertEqual(s.health_fail_count, 3)
 
-    def test_radius_converts_to_nm(self):
-        self.assertAlmostEqual(load_settings({"radius": "1.852", "radius_unit": "km"}).radius_nm, 1.0)
+    def test_zone_distances_convert_to_nm(self):
+        s = load_settings({"zone1_north": "1.852", "zone1_south": "0", "zone1_east": "1.852", "zone1_west": "0", "radius_unit": "km"})
+        self.assertEqual([round(v, 6) for v in s.zone("receiver1").bounds_nm()], [1.0, 0.0, 1.0, 0.0])
 
     def assert_falls_back(self, key, bad_value):
         s = load_settings({key: bad_value})
@@ -85,10 +87,6 @@ class SettingsValidationTests(unittest.TestCase):
             ("online_idle_interval_s", "1"),
             ("max_data_age_s", "-1"),
             ("release_delay_s", "-1"),
-            ("radius", "0"),
-            ("radius", "abc"),
-            ("radius", "nan"),
-            ("radius", "inf"),
             ("radius_unit", "furlongs"),
             ("source_mode", "everything"),
             ("online_provider", "unknown.example"),
@@ -111,12 +109,13 @@ class SettingsValidationTests(unittest.TestCase):
         self.assertEqual(s.warnings, ())
 
     def test_floor_above_ceiling_uses_the_default_band(self):
-        s = load_settings({"alt_floor_ft": "5000", "alt_ceiling_ft": "1000"})
-        self.assertEqual((s.alt_floor_ft, s.alt_ceiling_ft), (0.0, 10000.0))
+        s = load_settings({"radius_receiver": "5", "zone1_alt_floor_ft": "5000", "zone1_alt_ceiling_ft": "1000"})
+        zone = s.zone("receiver1")
+        self.assertEqual((zone.alt_floor_ft, zone.alt_ceiling_ft), (0.0, 10000.0))
         self.assertTrue(s.warnings)
 
-    def test_radius_beyond_the_online_cap_warns(self):
-        self.assertTrue(load_settings({"radius": "300", "radius_unit": "nm"}).warnings)
+    def test_an_online_zone_beyond_the_online_cap_warns(self):
+        self.assertTrue(load_settings({"radius": "200", "radius_unit": "nm"}).warnings)
 
     def test_matrix_models_become_a_list(self):
         s = load_settings({"matrix_models": "Panel A, Panel B,,"})
@@ -286,7 +285,7 @@ class ConfigStoreTests(unittest.TestCase):
 
     def test_missing_files_give_defaults(self):
         store = ConfigStore(self.paths)
-        self.assertIsNone(store.settings.radius)
+        self.assertEqual(store.settings.zones, ())
         self.assertEqual(store.fixtures, ())
         self.assertEqual(store.warnings, ())
 
@@ -295,7 +294,7 @@ class ConfigStoreTests(unittest.TestCase):
         self.write(self.paths.private_file, json.dumps({"center_lat": 1, "center_lon": 2}))
         self.write(self.paths.fixtures_file, json.dumps([{"name": "H", "universe": 1, "dimmer_ch": 1}]))
         store = ConfigStore(self.paths)
-        self.assertEqual(store.settings.radius, 7.0)
+        self.assertEqual(store.settings.zone("online").north, 7.0)
         self.assertTrue(store.settings.center_set)
         self.assertEqual(len(store.fixtures), 1)
 
@@ -305,7 +304,7 @@ class ConfigStoreTests(unittest.TestCase):
         self.assertFalse(store.reload())
         self.write(self.paths.config_file, 'radius = "8"\n')
         self.assertTrue(store.reload())
-        self.assertEqual(store.settings.radius, 8.0)
+        self.assertEqual(store.settings.zone("online").north, 8.0)
         self.assertFalse(store.reload())
 
     def test_corrupt_fixture_file_keeps_the_last_good_list(self):

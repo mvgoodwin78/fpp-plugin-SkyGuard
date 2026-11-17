@@ -3,7 +3,7 @@
     <fieldset class="border rounded p-3">
         <legend>What SkyGuard does</legend>
         <p>
-            SkyGuard blacks out your moving heads while an aircraft is inside a radius you set, so beams aren't pointed at it.
+            SkyGuard blacks out your moving heads while an aircraft is inside a zone you set, so beams aren't pointed at it.
             It forces only each head's dimmer and shutter channels to off values. Pan, tilt, color and everything else keep following the sequence, and other props aren't touched.
         </p>
         <p class="mb-0">
@@ -18,7 +18,7 @@
         <ol class="mb-0">
             <li><strong>Confirm personal use.</strong> SkyGuard is for personal use only and stays idle until you confirm this.</li>
             <li><strong>Choose your data.</strong> Use your own ADS-B receiver, online data, or both. Your receiver can be on another device on your network, or on the FPP box itself: then SkyGuard reads what readsb, dump1090-fa or dump978-fa writes there, with no address needed. On the Data Source tab, the Test buttons show whether each source answers.</li>
-            <li><strong>Set the location and zone.</strong> Enter the center point and a radius for each source in use, your show's elevation (Look it up fills it in), and the lowest and highest altitudes that count, as heights above your show. SkyGuard stays idle until the center and radii are entered. Online data can lag behind real aircraft, so increase your online radius by 3 miles to allow for it.</li>
+            <li><strong>Set the location and zones.</strong> Enter the center point and your show's elevation (Look it up fills it in). Each zone is a box: enter how far it reaches north, south, east and west of the center, and the lowest and highest altitudes that count in it, as heights above your show. Receiver zone 1 is for your receiver, with an optional receiver zone 2, for example along an approach path; the online zone is for online data. SkyGuard stays idle until the center and the zones for your data sources are entered. Online data can lag behind real aircraft, so make the online zone 3 miles larger on every side to allow for it.</li>
             <li><strong>Add your heads.</strong> On the Fixtures tab, add one row per head and pick its model. Then enter its dimmer and shutter channels from the fixture's DMX chart (for example 6 and 7) and the value that means off for each (often 0; check your fixture's manual). The row shows the FPP channels that gives. If your heads aren't in the model list, upload models from xLights with FPP Connect, with the Models column set to All. Or choose Start channel and enter the head's start channel from xLights.</li>
             <li><strong>Add a message, if you want one.</strong> The Matrix Message tab can show text on your LED panels during a blackout. Test on panels runs until you press Stop, and shows a live view of the first panel you ticked.</li>
             <li><strong>Test it.</strong> Press Test on a row in Fixtures to black out that head for 3 seconds, or Test all heads on the status page for 5 seconds. Watch the real heads: only you can confirm they go dark.</li>
@@ -30,16 +30,17 @@
         <ul>
             <li><strong>It only happens during a show.</strong> A show means a playlist or sequence playing, including one you started by hand, or live E1.31, Art-Net or DDP data arriving at FPP, and for 30 seconds after it stops. That last one means an xLights test session can black out the heads too. Outside a show the state is IDLE and the heads aren't touched, apart from your own tests.</li>
             <li><strong>It starts on the first poll</strong> that finds an aircraft in the zone, and ends once the zone has been clear for the release delay.</li>
-            <li><strong>Altitude limits apply.</strong> An aircraft must be between your lowest and highest altitudes to count. Those are heights above your show: aircraft report height above sea level, so SkyGuard subtracts your show elevation. With the show at 800 ft and a highest altitude of 3,000 ft, aircraft below 3,800 ft above sea level count. If its altitude is unknown and it's inside the radius, it counts. Aircraft report pressure altitude, which on a high-pressure day can read below 0 for one coming in low, so a lowest altitude of 0 means no lower limit.</li>
-            <li><strong>Aircraft with no position</strong> count as in the zone if their altitude is in range, unless you turn that off under Advanced.</li>
+            <li><strong>Altitude limits apply.</strong> An aircraft must be between the zone's lowest and highest altitudes to count in it, and each zone has its own. Those are heights above your show: aircraft report height above sea level, so SkyGuard subtracts your show elevation. With the show at 800 ft and a highest altitude of 3,000 ft, aircraft below 3,800 ft above sea level count. If its altitude is unknown and it's inside a zone, it counts. Aircraft report pressure altitude, which on a high-pressure day can read below 0 for one coming in low, so a lowest altitude of 0 means no lower limit.</li>
+            <li><strong>Aircraft with no position</strong> count as in the zone if their altitude is in any zone's range, unless you turn that off under Advanced.</li>
+            <li><strong>Every aircraft that passes through a zone is logged</strong>, show or no show: the Zone log on the status page lists its callsign, altitudes and how long it was inside, and Download CSV saves the last 90 days.</li>
             <li><strong>Ground traffic:</strong> with "Ignore aircraft on the ground" on, an aircraft reporting it's on the ground is skipped until it reaches the ground speed limit under Advanced, which is 40 knots by default. The map and list show these as <code>ground (ignored)</code>. A helicopter hovering low still counts unless it reports being on the ground.</li>
         </ul>
         <h6>With your receiver and online data together</h6>
         <ul>
-            <li>Your receiver has priority. An aircraft it has located goes by your receiver radius, wherever online data puts that aircraft.</li>
-            <li>During a show, online data is also checked. An aircraft your receiver misses, or reports with no position, goes by the online data and online radius and can cause a blackout. The map circles it and the map and list mark it <code>receiver missed it</code>. The line under the map counts them.</li>
+            <li>Your receiver has priority. An aircraft it has located goes by your receiver zones, wherever online data puts that aircraft.</li>
+            <li>During a show, online data is also checked. An aircraft your receiver misses, or reports with no position, goes by the online data and the online zone and can cause a blackout. The map circles it and the map and list mark it <code>receiver missed it</code>. The line under the map counts them.</li>
             <li>If online data stops while your receiver works, there's no blackout, but a warning says missed aircraft won't be caught.</li>
-            <li>If your receiver stops, online data takes over with the online radius until the receiver returns.</li>
+            <li>If your receiver stops, online data takes over with the online zone until the receiver returns.</li>
         </ul>
         <h6>If something goes wrong: it fails dark</h6>
         <ul class="mb-0">
@@ -64,23 +65,26 @@
             <dt>The status page says NOT RUNNING</dt>
             <dd>SkyGuard's program has stopped, so the heads aren't protected. Restart FPPD. If it still says this, reboot. If it stops again, check the log.</dd>
 
+            <dt>An aircraft is missing from the Zone log</dt>
+            <dd>A visit is written once the aircraft has been out of the zone for 30 seconds, and until then it shows at the top marked "inside now". Only aircraft that count in a zone are logged: inside the box and within that zone's altitudes, and not ignored as on the ground.</dd>
+
             <dt>A helicopter shows as a round blip on the map</dt>
             <dd>An aircraft shows as a helicopter (a diamond) only when it reports itself as one, and some don't. The shape is only for the map: helicopters and planes are treated the same for a blackout.</dd>
 
             <dt>Reading the status map</dt>
-            <dd>The status map is a radar scope with your map faint underneath. Each aircraft is a blip: green normally, red in the zone, grey on the ground and ignored. The short line from a blip points where it is heading. An orange ring means only online data saw it, so your receiver missed it. The rings are distances from your center out to the Map range, and the legend under the map lists each one.</dd>
+            <dd>The status map is a radar scope with your map faint underneath. Each aircraft is a blip: green normally, red in the zone, grey on the ground and ignored. The short line from a blip points where it is heading. An orange ring means only online data saw it, so your receiver missed it. The rings are distances from your center out to the Map range. The boxes are your zones: cyan for receiver zone 1, orange for receiver zone 2 and pink for the online zone, solid while in use. The legend under the map lists each one with its distances and altitudes.</dd>
 
             <dt>The plane icon at the top of FPP looks out of date</dt>
             <dd>Hover over it to see whether SkyGuard is on or off, and what it's doing. FPP refreshes this icon on its own schedule, so it can take about 30 seconds to catch up after a change. The status page is always current. Green means on and all is well, yellow means off or a warning, and red means blacked out or not running.</dd>
 
             <dt>The state stays IDLE</dt>
-            <dd>The words beside the state say why. It may be that no show is running, SkyGuard is disabled, or the personal use confirmation, center point or a radius is missing.</dd>
+            <dd>The words beside the state say why. It may be that no show is running, SkyGuard is disabled, or the personal use confirmation, center point or a zone is missing.</dd>
 
             <dt>No aircraft on the map, but the online Test finds some</dt>
             <dd>The Test makes its own request. The map uses SkyGuard's regular polling, which asks for online data only during a show, and never while SkyGuard is disabled. To see aircraft between shows, turn on "Check online data between shows" under Advanced in SkyGuard Settings.</dd>
 
             <dt>Aircraft I expect aren't on the map</dt>
-            <dd>The map shows aircraft out to the Map range on the Location &amp; Zone tab, 25 miles unless you changed it. Raise it to see further; it changes only the map and list, never what blacks out. The line under the map says how many aircraft are inside your radius right now.</dd>
+            <dd>The map shows aircraft out to the Map range on the Location &amp; Zone tab, 25 miles unless you changed it. Raise it to see further; it changes only the map and list, never what blacks out. The line under the map says how many aircraft are inside your zones right now.</dd>
 
             <dt>The map shows a radar plot instead</dt>
             <dd>Map images couldn't load, usually because this device or your browser can't reach the internet. The plot uses the same data. An empty map address under Advanced also gives you the plot.</dd>
@@ -126,7 +130,7 @@
     <fieldset class="border rounded p-3 mt-3">
         <legend>What leaves this device</legend>
         <ul class="mb-0">
-            <li><strong>Online flight data:</strong> your show's location and search radius go to the provider you choose, during a show. Between shows nothing goes unless you turn on "Check online data between shows", and nothing goes while SkyGuard is disabled or before you confirm personal use.</li>
+            <li><strong>Online flight data:</strong> your show's location and a search distance that covers your online zone go to the provider you choose, during a show. Between shows nothing goes unless you turn on "Check online data between shows", and nothing goes while SkyGuard is disabled or before you confirm personal use.</li>
             <li><strong>Map:</strong> while a map is open, your browser loads images from OpenStreetMap, which shows it roughly where your show is. Clear the map address under Advanced to stop this.</li>
             <li><strong>Address lookup:</strong> a typed address goes to OpenStreetMap only when you press Look up.</li>
             <li><strong>Elevation lookup:</strong> your saved center point goes to Open-Meteo only when you press Look it up.</li>

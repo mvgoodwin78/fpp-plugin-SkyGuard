@@ -6,6 +6,7 @@ function getEndpointsfpppluginSkyGuard() {
     return array(
         array('method' => 'GET', 'endpoint' => 'status', 'callback' => 'fppPluginSkyGuardStatus'),
         array('method' => 'GET', 'endpoint' => 'headerIndicator', 'callback' => 'fppPluginSkyGuardHeaderIndicator'),
+        array('method' => 'GET', 'endpoint' => 'visits', 'callback' => 'fppPluginSkyGuardVisits'),
         array('method' => 'POST', 'endpoint' => 'geocode', 'callback' => 'fppPluginSkyGuardGeocode'),
         array('method' => 'POST', 'endpoint' => 'elevation', 'callback' => 'fppPluginSkyGuardElevation'),
         array('method' => 'GET', 'endpoint' => 'private', 'callback' => 'fppPluginSkyGuardPrivateGet'),
@@ -167,6 +168,39 @@ function fppPluginSkyGuardHeaderIndicator() {
         'tooltip' => fppPluginSkyGuardIndicatorText($tooltip),
         'link' => 'plugin.php?plugin=fpp-plugin-SkyGuard&page=status.php',
     ));
+}
+
+// GET /api/plugin/fpp-plugin-SkyGuard/visits?limit=100
+// The zone log, newest first: each aircraft that passed through a zone. The daemon appends one
+// JSON line per finished visit and keeps 90 days. limit=all returns every visit, for the CSV.
+function fppPluginSkyGuardVisits() {
+    $path = fppPluginSkyGuardDataDir() . '/zone_visits.jsonl';
+    $all = isset($_GET['limit']) && $_GET['limit'] === 'all';
+    $limit = isset($_GET['limit']) ? intval($_GET['limit']) : 100;
+    $limit = max(1, min(1000, $limit));
+    $visits = array();
+    $handle = is_readable($path) ? @fopen($path, 'r') : false;
+    if ($handle !== false) {
+        // Only the end is needed for a limited read; visits are about 250 bytes a line.
+        $size = filesize($path);
+        $from = $all ? 0 : max(0, $size - $limit * 600);
+        fseek($handle, $from);
+        if ($from > 0) {
+            fgets($handle); // part of a line
+        }
+        while (($line = fgets($handle)) !== false) {
+            $visit = json_decode($line, true);
+            if (is_array($visit) && isset($visit['zone'], $visit['hex'], $visit['entered'])) {
+                $visits[] = $visit;
+            }
+        }
+        fclose($handle);
+    }
+    $visits = array_reverse($visits);
+    if (!$all) {
+        $visits = array_slice($visits, 0, $limit);
+    }
+    return json(array('visits' => $visits));
 }
 
 // GET /api/plugin/fpp-plugin-SkyGuard/private

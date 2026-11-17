@@ -1,17 +1,18 @@
 # SkyGuard
 
-An FPP plugin that blacks out moving-head light output whenever an aircraft is inside a radius you set, so beams aren't pointed at aircraft. Only each head's dimmer and shutter channels are forced to off values; pan, tilt, color and every other channel keep following the sequence.
+An FPP plugin that blacks out moving-head light output whenever an aircraft is inside a zone you set, so beams aren't pointed at aircraft. Only each head's dimmer and shutter channels are forced to off values; pan, tilt, color and every other channel keep following the sequence.
 
 **Status: in development.** It has been tested on one FPP 10.3 box, but not yet with real moving heads, a real receiver or on FPP 9.5. Don't rely on it at a show yet.
 
 ## How it works
 
-- **Aircraft data** comes from a local ADS-B receiver (on another device, or on the FPP box itself), an online provider (adsb.fi or adsb.lol), or both. With both, the receiver has priority: an aircraft it has located goes by the receiver radius. During a show, an aircraft it misses goes by the online data and online radius, and if the receiver stops, online data takes over.
+- **Aircraft data** comes from a local ADS-B receiver (on another device, or on the FPP box itself), an online provider (adsb.fi or adsb.lol), or both. With both, the receiver has priority: an aircraft it has located goes by the receiver zones. During a show, an aircraft it misses goes by the online data and the online zone, and if the receiver stops, online data takes over.
 - **SkyGuard is for personal use only**, and it does nothing until you confirm that.
-- **Online data can lag behind real aircraft**, so increase your radius by 3 miles when using it. You enter one radius for online data and another for your own receiver, and SkyGuard stays idle until each one in use has been entered.
+- **Zones are boxes** around your show: you enter how far each reaches north, south, east and west, and its own lowest and highest altitudes. There are two receiver zones (the second is optional, for example along an approach path) and an online zone, and SkyGuard stays idle until each one in use has been entered. Online data can lag behind real aircraft, so make the online zone 3 miles larger on every side.
+- **Every aircraft that passes through a zone is logged** with its callsign, altitudes and time inside, shown on the status page and saved as CSV, kept for 90 days.
 - **Heads** are picked by their FPP model (uploaded from xLights with FPP Connect) or a start channel, with the dimmer and shutter channels from the fixture's DMX chart. SkyGuard follows a model that is re-patched.
 - **Altitudes** are heights above your show: enter its elevation, or look it up.
-- **During a show**, any qualifying aircraft inside the radius and altitude band blacks out the heads on that poll. They're released once the zone has been empty for the release delay.
+- **During a show**, any qualifying aircraft inside a zone and within its altitudes blacks out the heads on that poll. They're released once the zone has been empty for the release delay.
 - **It fails dark.** If aircraft data stops, or SkyGuard hits an unexpected error during a show, the heads black out. If the program itself crashes during a blackout, they stay dark until it restarts.
 - **It doesn't replace your own judgment or any legal duty.** Coverage depends on what aircraft broadcast and on your data source, and not every aircraft can be seen.
 

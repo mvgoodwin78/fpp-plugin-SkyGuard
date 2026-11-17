@@ -21,7 +21,7 @@ from urllib.parse import urlsplit
 from . import REPO_NAME
 from .feeds.online_adsbx_v2 import DEFAULT_PROVIDER, MAX_QUERY_RADIUS_NM, PROVIDERS
 from .feeds.receiver import LOCAL_RECEIVER
-from .geo import to_nm
+from .geo import to_nm, zone_reach_nm
 
 DEFAULT_MEDIA_DIR = "/home/fpp/media"
 FEED_RECEIVER = "receiver"
@@ -29,6 +29,20 @@ FEED_ONLINE = "online"
 SOURCE_MODES = ("receiver", "online", "both")
 RECEIVER_LOCATIONS = ("other", "this_box")
 RADIUS_UNITS = ("mi", "nm", "km")
+SIDES = ("north", "south", "east", "west")
+MAX_ZONE_DISTANCE = 250  # in the distance unit, per side
+
+# The zones: (id, settings key prefix, feed, label). Receiver zone 2 is optional.
+ZONE_RECEIVER_1 = "receiver1"
+ZONE_RECEIVER_2 = "receiver2"
+ZONE_ONLINE = "online"
+ZONE_KEYS = (
+    (ZONE_RECEIVER_1, "zone1", "receiver", "Receiver zone 1"),
+    (ZONE_RECEIVER_2, "zone2", "receiver", "Receiver zone 2"),
+    (ZONE_ONLINE, "online_zone", "online", "Online zone"),
+)
+# Before zones were boxes, each feed had a radius and both shared one altitude band.
+_LEGACY_RADIUS = {ZONE_RECEIVER_1: "radius_receiver", ZONE_ONLINE: "radius"}
 GEOCODERS = ("nominatim", "off")
 MATRIX_POSITIONS = ("Center", "Right to Left", "Left to Right", "Bottom to Top", "Top to Bottom")
 
@@ -48,6 +62,7 @@ class Paths:
     ledger_file: str
     model_channels_file: str
     status_file: str
+    zone_log_file: str
     commands_dir: str
     supervisor_pid_file: str
     supervisor_lock_file: str
@@ -68,12 +83,40 @@ class Paths:
             ledger_file=os.path.join(data, "active_ranges.json"),
             model_channels_file=os.path.join(data, "model_channels.json"),
             status_file=os.path.join(data, "status.json"),
+            zone_log_file=os.path.join(data, "zone_visits.jsonl"),
             commands_dir=os.path.join(data, "commands"),
             supervisor_pid_file=os.path.join(data, "supervisor.pid"),
             supervisor_lock_file=os.path.join(data, "supervisor.lock"),
             daemon_pid_file=os.path.join(data, "daemon.pid"),
             log_file=os.path.join(logs, f"plugin-{REPO_NAME}.log"),
         )
+
+
+@dataclass(frozen=True)
+class Zone:
+    """A box around the center point: how far it reaches north, south, east and west of
+    it, in the distance unit, and the altitude band that counts inside it, in feet above
+    the show."""
+
+    id: str
+    feed: str
+    label: str
+    north: float
+    south: float
+    east: float
+    west: float
+    alt_floor_ft: float = 0.0
+    alt_ceiling_ft: float = 10000.0
+    unit: str = "mi"
+
+    def bounds_nm(self):
+        """(north, south, east, west) in nautical miles."""
+        return tuple(to_nm(getattr(self, side), self.unit) for side in SIDES)
+
+    @property
+    def reach_nm(self):
+        """The distance to the farthest corner, which an online query must cover."""
+        return zone_reach_nm(self.bounds_nm())
 
 
 @dataclass(frozen=True)
@@ -94,12 +137,11 @@ class Settings:
     max_data_age_s: float = 5.0
     center_lat: float | None = None
     center_lon: float | None = None
-    radius: float | None = None  # used with online data; the user must enter it
-    radius_receiver: float | None = None  # used with a receiver; the user must enter it
-    radius_unit: str = "mi"
+    # The complete zones, as Zone. Receiver zone 1 is required with a receiver and the online
+    # zone with online data; neither has a default, and neither borrows the other.
+    zones: tuple = ()
+    radius_unit: str = "mi"  # the distance unit, for the zones and the map range
     map_range: float = 25.0  # how far out the map and list show aircraft, in radius_unit; display only
-    alt_floor_ft: float = 0.0
-    alt_ceiling_ft: float = 10000.0
     show_elevation_ft: float = 0.0  # the show's height above sea level; the limits are above the show
     count_no_position: bool = True
     ignore_ground: bool = False
@@ -115,6 +157,7 @@ class Settings:
     matrix_position: str = "Right to Left"
     matrix_speed: int = 40
     geocoder: str = "nominatim"
+    zone2_enabled: bool = False  # receiver zone 2 is used only when this is on
     warnings: tuple = ()
 
     @property
@@ -131,29 +174,32 @@ class Settings:
             return True
         return self.source_mode == "both" and bool(self.receiver_url or self.receiver_978_url)
 
+    def zone(self, zone_id):
+        for zone in self.zones:
+            if zone.id == zone_id:
+                return zone
+        return None
+
     @property
-    def radius_ready(self):
-        """Whether a radius has been entered for every data source in use."""
-        if self.uses_online and self.radius is None:
+    def zones_ready(self):
+        """Whether the zone each data source in use needs has been entered."""
+        if self.uses_online and self.zone(ZONE_ONLINE) is None:
             return False
-        return not (self.uses_receiver and self.radius_receiver is None)
+        return not (self.uses_receiver and self.zone(ZONE_RECEIVER_1) is None)
 
-    def radius_for(self, feed):
-        """The radius entered for `feed`, in the user's unit, or None."""
-        return self.radius_receiver if feed == FEED_RECEIVER else self.radius
-
-    def radius_nm_for(self, feed):
-        value = self.radius_for(feed)
-        return None if value is None else to_nm(value, self.radius_unit)
+    def zones_for(self, feed):
+        """The zones that judge aircraft from `feed`."""
+        return tuple(zone for zone in self.zones if zone.feed == feed)
 
     @property
     def map_range_nm(self):
         return to_nm(self.map_range, self.radius_unit)
 
     @property
-    def radius_nm(self):
-        """The radius used with online data, which is also what online queries must cover."""
-        return self.radius_nm_for(FEED_ONLINE)
+    def online_reach_nm(self):
+        """How far online queries must reach to cover the online zone, or None."""
+        zone = self.zone(ZONE_ONLINE)
+        return None if zone is None else zone.reach_nm
 
 
 @dataclass(frozen=True)
@@ -305,6 +351,90 @@ def _load_center(private, warnings):
     return lat, lon
 
 
+def _band_value(read, key, legacy_key, default):
+    """One altitude limit: the zone's own key, else the band all zones shared before."""
+    if key not in read.raw:
+        key = legacy_key
+    value = read.raw.get(key)
+    if _is_blank(value):
+        return default
+    try:
+        return _parse_float(value)
+    except (TypeError, ValueError):
+        read.warnings.append(f"Setting '{key}' is invalid; using the default ({default:g}).")
+        return default
+
+
+def _altitude_band(read, prefix, label):
+    floor = _band_value(read, f"{prefix}_alt_floor_ft", "alt_floor_ft", Zone.alt_floor_ft)
+    ceiling = _band_value(read, f"{prefix}_alt_ceiling_ft", "alt_ceiling_ft", Zone.alt_ceiling_ft)
+    if floor > ceiling:
+        read.warnings.append(f"{label}: the lowest altitude is above the highest, so 0 to 10,000 feet is used.")
+        return Zone.alt_floor_ft, Zone.alt_ceiling_ft
+    return floor, ceiling
+
+
+def _legacy_distances(read, legacy):
+    """An install from before zones were boxes: its radius becomes a square box of the same
+    size, so an update never drops protection. The update's migration writes the four
+    distances, so this lasts only until then."""
+    try:
+        radius = _parse_float(read.raw[legacy])
+    except (TypeError, ValueError):
+        radius = 0
+    if 0 < radius <= MAX_ZONE_DISTANCE:
+        return (radius,) * 4
+    read.warnings.append(f"Setting '{legacy}' is invalid, so it is treated as not set.")
+    return None
+
+
+def _zone_distances(read, zone_id, prefix, label):
+    """The four distances, or None when the zone isn't complete."""
+    keys = [f"{prefix}_{side}" for side in SIDES]
+    legacy = _LEGACY_RADIUS.get(zone_id)
+    if legacy and not any(key in read.raw for key in keys) and not _is_blank(read.raw.get(legacy)):
+        return _legacy_distances(read, legacy)
+    values = []
+    bad = False
+    for key in keys:
+        value = read.raw.get(key)
+        if _is_blank(value):
+            values.append(None)
+            continue
+        try:
+            number = _parse_float(value)
+        except (TypeError, ValueError):
+            number = -1
+        if not 0 <= number <= MAX_ZONE_DISTANCE:
+            read.warnings.append(f"Setting '{key}' is invalid, so it is treated as not set.")
+            bad = True
+            number = None
+        values.append(number)
+    if any(value is None for value in values):
+        if not bad and any(value is not None for value in values):
+            read.warnings.append(f"{label} needs all four distances: north, south, east and west.")
+        return None
+    north, south, east, west = values
+    if north + south <= 0 or east + west <= 0:
+        read.warnings.append(f"{label} has no area: north plus south, and east plus west, must each be more than 0.")
+        return None
+    return tuple(values)
+
+
+def _load_zones(raw, unit, warnings):
+    read = _Reader(raw)
+    zones = []
+    for zone_id, prefix, feed, label in ZONE_KEYS:
+        if zone_id == ZONE_RECEIVER_2 and not read.boolean("zone2_enabled"):
+            continue
+        distances = _zone_distances(read, zone_id, prefix, label)
+        floor, ceiling = _altitude_band(read, prefix, label)
+        if distances is not None:
+            zones.append(Zone(zone_id, feed, label, *distances, floor, ceiling, unit))
+    warnings.extend(read.warnings)
+    return tuple(zones)
+
+
 def load_settings(raw, private=None):
     """Build Settings from the plugin config values and the private.json values."""
     private = private or {}
@@ -325,12 +455,8 @@ def load_settings(raw, private=None):
         health_interval_s=read.number("health_interval_s", 1),
         health_fail_count=read.number("health_fail_count", 1, parse=_parse_int),
         max_data_age_s=read.number("max_data_age_s", 0),
-        radius=read.number("radius", 0.01),
-        radius_receiver=read.number("radius_receiver", 0.01),
         radius_unit=read.choice("radius_unit", RADIUS_UNITS),
         map_range=read.number("map_range", 1, 250),
-        alt_floor_ft=read.number("alt_floor_ft"),
-        alt_ceiling_ft=read.number("alt_ceiling_ft"),
         show_elevation_ft=read.number("show_elevation_ft", -1500, 15000),
         count_no_position=read.boolean("count_no_position"),
         ignore_ground=read.boolean("ignore_ground"),
@@ -354,17 +480,11 @@ def load_settings(raw, private=None):
     if settings.receiver_location == "this_box":
         # 978 MHz on this box is found and merged by the local adapter, so no second feed.
         settings = replace(settings, receiver_url=LOCAL_RECEIVER, receiver_978_url="")
-    if settings.alt_floor_ft > settings.alt_ceiling_ft:
-        defaults = Settings()
-        warnings.append("The altitude floor is above the ceiling; using the default altitude band.")
-        settings = replace(
-            settings,
-            alt_floor_ft=defaults.alt_floor_ft,
-            alt_ceiling_ft=defaults.alt_ceiling_ft,
-        )
-    if settings.radius_nm is not None and settings.radius_nm > MAX_QUERY_RADIUS_NM:
+    settings = replace(settings, zones=_load_zones(raw, settings.radius_unit, warnings))
+    reach = settings.online_reach_nm
+    if reach is not None and reach > MAX_QUERY_RADIUS_NM:
         warnings.append(
-            f"The radius is larger than the {MAX_QUERY_RADIUS_NM} nm online feeds can query, "
+            f"The online zone reaches farther than the {MAX_QUERY_RADIUS_NM} nm online feeds can query, "
             "so an online feed won't cover the whole zone."
         )
     center_lat, center_lon = _load_center(private, warnings)

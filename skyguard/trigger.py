@@ -7,7 +7,7 @@ Nothing here touches the clock, the network or FPP. Callers pass in a monotonic
 from dataclasses import dataclass
 
 from .feeds.base import GROUND
-from .geo import haversine_nm
+from .geo import haversine_nm, in_box, offset_nm
 
 IDLE = "IDLE"
 CLEAR = "CLEAR"
@@ -20,7 +20,7 @@ REASON_SCHEDULE = "schedule"
 REASON_DISABLED = "disabled"
 REASON_NOT_CONFIRMED = "not_confirmed"
 REASON_NO_CENTER = "no_center"
-REASON_NO_RADIUS = "no_radius"
+REASON_NO_ZONE = "no_zone"
 REASON_RESUME = "resume"
 REASON_CLEAR = "clear"
 
@@ -34,6 +34,8 @@ class EvaluatedAircraft:
     distance_nm: float | None  # None when the aircraft has no position
     in_zone: bool
     ground_ignored: bool = False
+    zones: tuple = ()  # ids of the zones it counts in: inside the box and the zone's altitude band
+    in_area: bool = False  # inside any of the boxes it was judged by, at any altitude
 
     @property
     def note(self):
@@ -89,31 +91,47 @@ def evaluate_zone(
     records,
     center_lat,
     center_lon,
-    radius_nm,
-    floor_ft,
-    ceiling_ft,
+    zones,
     count_no_position,
     ignore_ground=False,
     ground_speed_limit_kt=DEFAULT_GROUND_SPEED_LIMIT_KT,
     elevation_ft=0.0,
 ):
-    """Apply the ground, distance, altitude and no-position rules to one poll's aircraft.
-    Altitude limits are heights above the show, which is `elevation_ft` above sea level."""
+    """Apply the ground, box, altitude and no-position rules to one poll's aircraft.
+
+    `zones` are the boxes that judge these records, each with `id`, `bounds_nm()` and its
+    own altitude band; an aircraft counts if it is inside any one of them within that
+    zone's band. Altitude limits are heights above the show, which is `elevation_ft` above
+    sea level."""
+    boxes = [(zone.id, zone.bounds_nm(), zone.alt_floor_ft, zone.alt_ceiling_ft) for zone in zones]
     evaluated = []
     skipped = []
     ground_skipped = []
     for record in records:
         known_altitude = record.alt_ft is not None
         no_position_skip = False
+        in_area = False
+        counted = ()
         if record.has_position:
             distance = haversine_nm(center_lat, center_lon, record.lat, record.lon)
-            # Inside the radius with no reported altitude counts, failing safe.
-            altitude_ok = not known_altitude or _altitude_passes(record.alt_ft, floor_ft, ceiling_ft, elevation_ft)
-            in_zone = distance <= radius_nm and altitude_ok
+            north, east = offset_nm(center_lat, center_lon, record.lat, record.lon)
+            inside = [box for box in boxes if in_box(north, east, box[1])]
+            in_area = bool(inside)
+            # Inside a box with no reported altitude counts, failing safe.
+            counted = tuple(
+                zone_id
+                for zone_id, _bounds, floor_ft, ceiling_ft in inside
+                if not known_altitude or _altitude_passes(record.alt_ft, floor_ft, ceiling_ft, elevation_ft)
+            )
+            in_zone = bool(counted)
         else:
             distance = None
-            # With neither position nor altitude there is nothing to act on.
-            altitude_ok = known_altitude and _altitude_passes(record.alt_ft, floor_ft, ceiling_ft, elevation_ft)
+            # With neither position nor altitude there is nothing to act on. Where it is isn't
+            # known, so it counts if its altitude is inside any zone's band.
+            altitude_ok = known_altitude and any(
+                _altitude_passes(record.alt_ft, floor_ft, ceiling_ft, elevation_ft)
+                for _zone_id, _bounds, floor_ft, ceiling_ft in boxes
+            )
             in_zone = altitude_ok and count_no_position
             no_position_skip = altitude_ok and not count_no_position
 
@@ -122,9 +140,10 @@ def evaluate_zone(
             if in_zone or no_position_skip:
                 ground_skipped.append(record)
             in_zone = False
+            counted = ()
         elif no_position_skip:
             skipped.append(record)
-        evaluated.append(EvaluatedAircraft(record, distance, in_zone, ground))
+        evaluated.append(EvaluatedAircraft(record, distance, in_zone, ground, counted, in_area))
 
     in_zone = tuple(a for a in evaluated if a.in_zone)
     return ZoneResult(
@@ -137,9 +156,9 @@ def evaluate_zone(
 
 
 def split_cross_check(receiver_records, online_records):
-    """Which radius judges which aircraft, when the online feed is checking the receiver.
+    """Which zones judge which aircraft, when the online feed is checking the receiver.
 
-    Returns (records for the receiver radius, records for the online radius). An aircraft
+    Returns (records for the receiver zones, records for the online zone). An aircraft
     the receiver has located belongs to the receiver alone, wherever online data puts it.
     One it doesn't report, or reports with no position, goes by online data. An online
     record with no position adds nothing if the receiver already reports that aircraft.
@@ -188,7 +207,7 @@ class Inputs:
     in_schedule: bool
     data_fresh: bool
     aircraft: tuple = ()  # in-zone AircraftRecords from this poll
-    radius_set: bool = True
+    zone_set: bool = True
     personal_use_confirmed: bool = True
 
 
@@ -257,8 +276,8 @@ class TriggerEngine:
             self._test_until = None
         if not inputs.center_set:
             return IDLE, REASON_NO_CENTER
-        if not inputs.radius_set:
-            return IDLE, REASON_NO_RADIUS
+        if not inputs.zone_set:
+            return IDLE, REASON_NO_ZONE
         if not inputs.in_schedule:
             return IDLE, REASON_SCHEDULE
         if not inputs.data_fresh:

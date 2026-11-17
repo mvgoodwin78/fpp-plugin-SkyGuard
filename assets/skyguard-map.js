@@ -56,6 +56,12 @@
         if (aircraft.online_only) {
             zone += ', receiver missed it';
         }
+        var zones = (aircraft.zones || []).map(function (id) {
+            return ZONE_NAMES[id] || id;
+        });
+        if (zones.length) {
+            zone += ' (' + zones.join(', ') + ')';
+        }
         return {
             name: aircraft.callsign || aircraft.hex || 'Unknown',
             altitude: altitude,
@@ -65,44 +71,58 @@
         };
     }
 
+    var ZONE_NAMES = { receiver1: 'receiver zone 1', receiver2: 'receiver zone 2', online: 'online zone' };
+
     function hasPosition(aircraft) {
         return typeof aircraft.lat === 'number' && typeof aircraft.lon === 'number';
     }
 
-    /* Each radius that applies to the data sources chosen, whichever feed is in use right now.
-       The one in use is what decides a blackout, so it's the solid one. */
-    function radii(status) {
-        var radius = status.radius || {};
+    var ZONE_KINDS = { receiver1: 'receiver', receiver2: 'receiver2', online: 'online' };
+
+    function formatFeet(value) {
+        return Math.round(value).toLocaleString() + ' ft';
+    }
+
+    /* Each zone that applies to the data sources chosen, whichever feed is in use right now: a box
+       reaching its own distance north, south, east and west of center. The ones in use decide a
+       blackout, so they're solid. */
+    function zoneList(status) {
+        var unit = status.unit;
         var list = [];
-        function add(kind, label, value) {
-            if (typeof value === 'number' && METERS[radius.unit]) {
-                list.push({
-                    kind: kind,
-                    label: label,
-                    text: value + ' ' + radius.unit,
-                    meters: value * METERS[radius.unit],
-                    active: status.active_feed === kind
-                });
+        if (!METERS[unit]) {
+            return list;
+        }
+        (status.zones || []).forEach(function (zone) {
+            if ((zone.feed === 'online' && status.source_mode === 'receiver') ||
+                (zone.feed === 'receiver' && status.source_mode === 'online')) {
+                return;
             }
-        }
-        if (status.source_mode !== 'receiver') {
-            add('online', 'Online radius', radius.online);
-        }
-        if (status.source_mode !== 'online') {
-            add('receiver', 'Receiver radius', radius.receiver);
-        }
+            var m = METERS[unit];
+            list.push({
+                kind: ZONE_KINDS[zone.id] || 'receiver',
+                label: zone.label,
+                text: 'N ' + zone.north + ', S ' + zone.south + ', E ' + zone.east + ', W ' + zone.west + ' ' + unit +
+                    '; ' + formatFeet(zone.alt_floor_ft) + ' to ' + formatFeet(zone.alt_ceiling_ft),
+                north: zone.north * m,
+                south: zone.south * m,
+                east: zone.east * m,
+                west: zone.west * m,
+                active: zone.active === true
+            });
+        });
         return list;
     }
 
+    /* How far the farthest corner of any zone is from center, in meters. */
     function largestMeters(list) {
         return list.reduce(function (largest, item) {
-            return Math.max(largest, item.meters);
+            return Math.max(largest, Math.sqrt(Math.pow(Math.max(item.north, item.south), 2) + Math.pow(Math.max(item.east, item.west), 2)));
         }, 0);
     }
 
     /* How far out aircraft are shown, in meters, or 0. A map without aircraft ignores it. */
     function rangeMeters(status, options) {
-        var unit = (status.radius || {}).unit;
+        var unit = status.unit;
         if (options.aircraft === false || typeof status.map_range !== 'number' || !METERS[unit]) {
             return 0;
         }
@@ -130,7 +150,7 @@
             rings.push(d);
         }
         rings.push(range);
-        return { unit: status.radius.unit, step: step, range: range, rings: rings };
+        return { unit: status.unit, step: step, range: range, rings: rings };
     }
 
     function legendEntry(box, swatchClass, text) {
@@ -143,14 +163,14 @@
         box.appendChild(entry);
     }
 
-    /* The radii, and on the scope what each blip and ring means. */
+    /* The zones, and on the scope what each blip and ring means. */
     function showLegend(box, list, scope) {
         if (!box) {
             return;
         }
         box.replaceChildren();
         box.classList.toggle('skyguard-scope-legend', !!scope);
-        var radiiRow = box;
+        var zonesRow = box;
         if (scope) {
             var blips = document.createElement('div');
             legendEntry(blips, 'skyguard-key-blip', 'Aircraft');
@@ -160,15 +180,15 @@
             legendEntry(blips, 'skyguard-key-missed', 'Receiver missed it (online data only)');
             legendEntry(blips, 'skyguard-key-heading', 'Heading');
             box.appendChild(blips);
-            radiiRow = document.createElement('div');
-            box.appendChild(radiiRow);
+            zonesRow = document.createElement('div');
+            box.appendChild(zonesRow);
         }
         list.forEach(function (item) {
-            legendEntry(radiiRow, 'skyguard-swatch skyguard-swatch-' + item.kind + (item.active ? '' : ' skyguard-swatch-standby'),
+            legendEntry(zonesRow, 'skyguard-swatch skyguard-swatch-' + item.kind + (item.active ? '' : ' skyguard-swatch-standby'),
                 item.label + ': ' + item.text + (item.active ? ' (in use now)' : ''));
         });
         if (scope && scope.rings) {
-            legendEntry(radiiRow, 'skyguard-swatch skyguard-swatch-range',
+            legendEntry(zonesRow, 'skyguard-swatch skyguard-swatch-range',
                 'Range rings every ' + scope.rings.step + ' ' + scope.rings.unit + ', out to ' + scope.rings.range + ' ' + scope.rings.unit);
         }
     }
@@ -234,10 +254,10 @@
             role: 'img',
             'aria-label': 'Radar plot of aircraft near the center point'
         });
-        var list = radii(status);
+        var list = zoneList(status);
         var largest = largestMeters(list);
         var center = status.center;
-        /* The outer ring is the map range. Without one, the largest radius is halfway out,
+        /* The outer ring is the map range. Without one, the farthest zone corner is halfway out,
            leaving room for aircraft approaching it. */
         var outer = Math.max(largest * 2, rangeMeters(status, options));
         var scale = outer ? 100 / outer : null;
@@ -266,12 +286,16 @@
             plot.appendChild(sweep);
         }
         list.forEach(function (item) {
-            var ring = item.meters * scale;
-            plot.appendChild(svgElement('circle', {
+            var top = -item.north * scale;
+            var left = -item.west * scale;
+            plot.appendChild(svgElement('rect', {
                 'class': 'skyguard-radar-zone skyguard-zone-' + item.kind + (item.active ? '' : ' skyguard-radar-zone-standby'),
-                r: ring
+                x: left,
+                y: top,
+                width: (item.west + item.east) * scale,
+                height: (item.north + item.south) * scale
             }));
-            text(2, -ring - 2, item.text);
+            text(left + 1, top - 1.5, item.label);
         });
         plot.appendChild(svgElement('circle', { 'class': 'skyguard-radar-center', r: 2 }));
         text(-8, -104, 'N');
@@ -295,7 +319,7 @@
                 });
                 plot.appendChild(target);
                 if (labelShown(aircraft, opened)) {
-                    var info = describe(aircraft, options.units(), status.radius.unit);
+                    var info = describe(aircraft, options.units(), status.unit);
                     text(x + 5, y + 2, info.name + (aircraft.ground_ignored ? ' ground (ignored)' : ''));
                 }
             });
@@ -450,10 +474,12 @@
 
         function drawMap(status) {
             var center = [status.center.lat, status.center.lon];
-            var list = radii(status);
+            var list = zoneList(status);
             var largest = largestMeters(list);
             var range = rangeMeters(status, options);
-            var key = center.join(',') + '/' + largest + '/' + range;
+            var key = center.join(',') + '/' + list.map(function (item) {
+                return [item.north, item.south, item.east, item.west].join(',');
+            }).join('/') + '/' + range;
             if (key !== viewKey) {
                 viewKey = key;
                 if (largest || range) {
@@ -479,8 +505,12 @@
             sweepAt = rings ? [center, rings.range * METERS[rings.unit]] : null;
             placeSweep();
             list.forEach(function (item) {
-                L.circle(center, {
-                    radius: item.meters,
+                L.polygon([
+                    offsetLatLng(center, item.north, item.east),
+                    offsetLatLng(center, -item.south, item.east),
+                    offsetLatLng(center, -item.south, -item.west),
+                    offsetLatLng(center, item.north, -item.west)
+                ], {
                     className: 'skyguard-zone skyguard-zone-' + item.kind,
                     weight: 2,
                     dashArray: item.active ? null : '6 6',
@@ -491,7 +521,7 @@
             L.circleMarker(center, { radius: 5, className: 'skyguard-center-dot', weight: 2, fillOpacity: 1, interactive: false }).addTo(layers);
             if (options.aircraft !== false) {
                 (status.aircraft || []).filter(hasPosition).forEach(function (aircraft) {
-                    var info = describe(aircraft, options.units(), status.radius.unit);
+                    var info = describe(aircraft, options.units(), status.unit);
                     var marker = L.marker([aircraft.lat, aircraft.lon], { icon: planeIcon(aircraft), keyboard: false });
                     if (labelShown(aircraft, opened)) {
                         marker.bindTooltip(planeLabel(aircraft, info), { permanent: true, direction: 'right', offset: [12, 0], className: 'skyguard-label' });
@@ -518,7 +548,7 @@
                 setNote('Set a center point to see the map.');
                 return;
             }
-            showLegend(options.legend, radii(status), scope ? { rings: rangeRings(status, options) } : null);
+            showLegend(options.legend, zoneList(status), scope ? { rings: rangeRings(status, options) } : null);
             var newTiles = null;
             if (!usingRadar && !map) {
                 if (!options.tiles || !window.L) {

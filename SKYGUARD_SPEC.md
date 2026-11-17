@@ -4,7 +4,7 @@ Nov 5, 2026
 
 ## Purpose and scope
 
-SkyGuard blacks out the light output of moving heads whenever any aircraft is inside a user-defined radius, so beams are never pointed at aircraft. Pan, tilt, color, gobo and every other channel keep following the sequence; only each head's dimmer and shutter channels are forced to a user-set off value. When the zone clears, those channels are released back to the sequence.
+SkyGuard blacks out the light output of moving heads whenever any aircraft is inside a user-defined zone, so beams are never pointed at aircraft. Pan, tilt, color, gobo and every other channel keep following the sequence; only each head's dimmer and shutter channels are forced to a user-set off value. When the zone clears, those channels are released back to the sequence.
 
 This document is the build spec for Claude Code. It covers phase 1 backend behavior. The user interface is specified in its own section and built after the backend.
 
@@ -50,7 +50,7 @@ Online feed        ─┘   (10 s health check,            │    one channel ra
                               │ active aircraft list   │   (LED panels + Virtual Display)
                               v                        ├─> Notifier
 FPP status API     ───> Trigger engine ────────────────┤   (warnings + log)
-(schedule window)       (radius + altitude band,       └─> Status endpoint
+(schedule window)       (zone boxes + altitude bands,       └─> Status endpoint
                          IDLE / CLEAR / BLACKOUT)          (api.php, later map view)
 ```
 
@@ -145,14 +145,14 @@ The query radius is capped at 250 nm. Any 4xx or 429 response counts as a failed
 ### Personal use and network lag
 
 - **Confirmation:** SkyGuard as a whole is for personal use only, on every setup including receiver-only. `personal_use_confirmed` starts false. Until it is true, the plugin stays IDLE with reason `not_confirmed`, holds no channels, makes no online requests, doesn't run Test Trigger, and `personal_use_required` shows a warning. Receiver polling continues so status stays useful, and setting it takes effect without a restart. The confirmation is the first step of first-run setup.
-- **Lag:** whenever `online` or `both` mode is selected, `notices[]` in the status, the Location & Zone tab and a log line say: "Online flight data can lag behind real aircraft. Increase your radius by 3 miles to allow for it." It is a notice rather than a warning because it would otherwise light FPP's header icon permanently and teach people to ignore it.
+- **Lag:** whenever `online` or `both` mode is selected, `notices[]` in the status, the Location & Zone tab and a log line say: "Online flight data can lag behind real aircraft. Make your online zone 3 miles larger on every side to allow for it." It is a notice rather than a warning because it would otherwise light FPP's header icon permanently and teach people to ignore it.
 
 ### Polling
 
 - **Receiver:** always poll every 1–2 s (user setting, default 1 s), in or out of the show window, and also while the plugin is disabled.
 - **Online, inside the show window:** poll at the same setting, but never faster than the provider's minimum interval (see Online providers), which in practice sets the rate.
 - **Online, outside the show window:** no requests, unless `online_between_shows` is on (off by default); then every `online_idle_interval_s` (default 30 s). Every online request carries the show's location, so it is only sent when it's needed (owner, Nov 8, 2026). This doesn't slow the start of a show: data 30 s old is already past the max data age, so the immediate poll at show start is what decides either way.
-- **Online, plugin disabled, center or online radius not set, or personal use not confirmed:** no online requests at all.
+- **Online, plugin disabled, center or online zone not set, or personal use not confirmed:** no online requests at all.
 - **Show window starts:** poll the active feed immediately, without waiting for the next interval.
 - FPP's status is read every 1 s regardless of the feed interval, so the start of a show is noticed quickly even at the 30 s online interval.
 - HTTP timeout per request: 3 s. Polling, health checks and the 978 decoder run on separate threads, so a dead host that takes the whole timeout to fail doesn't delay the others.
@@ -168,10 +168,10 @@ No fallback happens while online requests aren't allowed (plugin disabled or cen
 
 ### Online check on a working receiver (Both mode)
 
-The receiver has priority: it stays the active feed, and its radius judges every aircraft it has located, wherever online data puts that aircraft. Decided by the owner on Nov 6, 2026.
+The receiver has priority: it stays the active feed, and its zones judge every aircraft it has located, wherever online data puts that aircraft. Decided by the owner on Nov 6, 2026.
 
 - **During a show only**, with online requests allowed, the online feed is polled alongside the receiver, at the normal online rate and never faster than the provider's minimum. Outside a show nothing is sent while the receiver is healthy, because heads only black out during a show. Refusals and `Retry-After` are honored and follow the online feed through a fallback, and never hold up the receiver.
-- **An aircraft the receiver misses** is one in the online data, matched by hex, that the receiver doesn't report or reports with no position. It's judged by the online radius and the same altitude and ground rules, and can cause a blackout. Status marks it `online_only`.
+- **An aircraft the receiver misses** is one in the online data, matched by hex, that the receiver doesn't report or reports with no position. It's judged by the online zone, with that zone's altitude band and the same ground rules, and can cause a blackout. Status marks it `online_only`.
 - **If the check fails**, it never causes a blackout, because the receiver's data is still good. After three intervals with nothing new its data is dropped and `online_check_lost` warns that missed aircraft won't be caught; `online_check_ok` clears it.
 
 ### Second decoder (978 MHz)
@@ -199,7 +199,19 @@ No aircraft records are discarded for age or ground status; see the trigger engi
 
 ## Trigger engine
 
-The zone is one circle: a center lat/lon plus a radius, filtered by an altitude floor and ceiling. `radius` applies with online data and `radius_receiver` applies while a receiver is the active feed, so in `both` mode the radius changes automatically on fallback. The user must enter both: neither has a default, and neither borrows the other. Until a radius is entered for every data source in use, SkyGuard stays IDLE with reason `no_radius` and a warning, and makes no online requests. Any qualifying aircraft inside it puts the plugin in BLACKOUT; the zone must be empty for the release delay before channels are released.
+There are up to three zones, each a box around the center point: how far it reaches north, south, east and west of the center (so it can be longer on one side, for example along an approach path), plus its own altitude floor and ceiling. Decided by the owner on Nov 17, 2026.
+
+| Zone | Settings prefix | Judges | Required |
+|---|---|---|---|
+| Receiver zone 1 | `zone1_` | Receiver data | Whenever a receiver is in use |
+| Receiver zone 2 | `zone2_` | Receiver data | Optional, used only while `zone2_enabled` is on |
+| Online zone | `online_zone_` | Online data: while it is the active feed, and aircraft the receiver misses | Whenever online data is in use |
+
+The receiver zones apply while a receiver is the active feed and the online zone while online data is, so in `both` mode the zones in force change automatically on fallback. Receivers have little or no lag, so their zones can be tight; the online zone is separate so it can be larger to allow for online lag. The user must enter the required ones: no distance has a default, and no zone borrows another's. Until every required zone is complete, SkyGuard stays IDLE with reason `no_zone` and a warning, and makes no online requests. An aircraft that counts in any zone in force puts the plugin in BLACKOUT; every zone must be empty for the release delay before channels are released.
+
+Each distance is 0–250 in the distance unit (`radius_unit`), and a zone needs all four, with north + south and east + west each more than 0. A zone with a distance missing or invalid isn't used, with a warning naming it. Online queries are a point and radius, so they reach the online zone's farthest corner.
+
+**Upgrade from circles:** before Nov 17, 2026 each feed had a radius (`radius`, `radius_receiver`) and both shared `alt_floor_ft` / `alt_ceiling_ft`. The install's migration writes each radius as a square box of the same size and copies the band to every zone, so protection never lapses; until it has run, the daemon reads the old keys the same way.
 
 ### Center point
 
@@ -210,9 +222,9 @@ The zone is one circle: a center lat/lon plus a radius, filtered by an altitude 
 
 For each aircraft in the active feed's list:
 
-1. **Distance:** great-circle (haversine) distance from center to `lat/lon`. In zone if distance ≤ `radius`.
-2. **Altitude:** in zone if `alt_floor_ft` ≤ height above the show ≤ `alt_ceiling_ft`, where height = reported altitude − `show_elevation_ft` (feeds report height above sea level). An aircraft reporting `ground` counts as 0 ft above the show. Default floor 0 so ground traffic counts. Feeds report pressure altitude, which on a high-pressure day or near a low airport can be below 0 for an aircraft on approach, so a floor of 0 or less means no floor at all. An aircraft inside the radius that reports no altitude counts as in zone (fail-safe).
-3. **No position** (altitude but no lat/lon): governed by the `count_no_position` toggle. ON = treat as in zone if its altitude passes the altitude filter; OFF = skip it but log it. Default ON (fail-safe). The owner will review this default against real receiver traffic during acceptance, because a receiver can hear position-less aircraft far outside the radius.
+1. **Box:** the aircraft's offset north and east of center, in nautical miles (a local flat-earth approximation; longitude wraps at the 180th meridian). Inside a zone if −south ≤ north offset ≤ north and −west ≤ east offset ≤ east, edges included. `distance` is still reported, as the great-circle (haversine) distance from center.
+2. **Altitude:** in a zone if that zone's floor ≤ height above the show ≤ its ceiling, where height = reported altitude − `show_elevation_ft` (feeds report height above sea level). An aircraft reporting `ground` counts as 0 ft above the show. Default floor 0 so ground traffic counts. Feeds report pressure altitude, which on a high-pressure day or near a low airport can be below 0 for an aircraft on approach, so a floor of 0 or less means no floor at all. An aircraft inside a box that reports no altitude counts in that zone (fail-safe). An aircraft counts if it passes both checks for at least one zone in force; `zones` lists each one it counts in.
+3. **No position** (altitude but no lat/lon): governed by the `count_no_position` toggle. ON = treat as in zone if its altitude passes the band of any zone in force; OFF = skip it but log it. Default ON (fail-safe). The owner will review this default against real receiver traffic during acceptance, because a receiver can hear position-less aircraft far outside the zones.
 4. An aircraft with neither position nor altitude tells us nothing and is skipped, whatever the toggle says.
 5. Stale positions are not discarded; the last known position is used.
 
@@ -225,7 +237,7 @@ For each aircraft in the active feed's list:
 1. The feed reports it on the ground (`alt_baro` is `ground`).
 2. Its reported ground speed is below `ground_speed_limit_kt`, or it reports no speed at all.
 
-At the limit the aircraft counts as taking off and counts as in the radius on that same poll, even while it still reports `ground`. A numeric altitude plays no part in this rule, and nothing depends on aircraft type. An aircraft that doesn't report `ground` always goes through the normal rules, however slowly it is moving, so a helicopter below the limit is counted unless it reports `ground`. A `ground` report with no speed is omitted because airport surface vehicles report this way and would otherwise hold a blackout for the whole show.
+At the limit the aircraft counts as taking off and counts in the zone on that same poll, even while it still reports `ground`. A numeric altitude plays no part in this rule, and nothing depends on aircraft type. An aircraft that doesn't report `ground` always goes through the normal rules, however slowly it is moving, so a helicopter below the limit is counted unless it reports `ground`. A `ground` report with no speed is omitted because airport surface vehicles report this way and would otherwise hold a blackout for the whole show.
 
 A skipped aircraft is not part of `aircraft_in_zone`, the release delay or the matrix message. It stays in the status data and on the map, marked `ground (ignored)`. It is logged with the `ground_aircraft_ignored` event when it is first skipped inside the zone, not on every poll.
 
@@ -235,19 +247,19 @@ A skipped aircraft is not part of `aircraft_in_zone`, the release delay or the m
 
 | State | Entered when | Heads |
 | --- | --- | --- |
-| IDLE | Outside the show schedule, plugin disabled, personal use not confirmed, center not set, or a required radius not entered | Released; no overlays held |
+| IDLE | Outside the show schedule, plugin disabled, personal use not confirmed, center not set, or a required zone not entered | Released; no overlays held |
 | CLEAR | In schedule, data fresh, `aircraft_in_zone` = 0 for ≥ release delay | Released to the sequence |
 | BLACKOUT | In schedule and (`aircraft_in_zone` ≥ 1, or data older than max data age) | Forced to off values |
 
 - Entering BLACKOUT happens on the same poll the condition is seen; no delay.
 - Leaving BLACKOUT requires the zone empty and data fresh continuously for `release_delay_s` (user setting, default 5 s; 0 = release immediately).
 - Entering the window with fresh data and an empty zone goes straight to CLEAR. The release delay applies only to leaving BLACKOUT.
-- Precedence, highest first: disabled, personal use not confirmed, active test, center not set, radius not entered, outside the window, stale data, aircraft in zone. A test therefore works outside the show window and before the center is set, but not while disabled or before personal use is confirmed.
+- Precedence, highest first: disabled, personal use not confirmed, active test, center not set, zone not entered, outside the window, stale data, aircraft in zone. A test therefore works outside the show window and before the center is set, but not while disabled or before personal use is confirmed.
 - When a test ends, normal evaluation resumes at once with no release delay.
 - If the daemon restarts and its ledger shows ranges still held (see How the override is applied), it starts in BLACKOUT with reason `resume` and applies the normal rules from there. Until FPP's output configuration has been read once, heads set by universe can't be placed, so during a blackout every channel the ledger lists stays held as well. Otherwise a restart while FPP is slow to answer would release them with an aircraft overhead.
-- Every transition is logged with reason (`aircraft`, `no_data`, `test`, `schedule`, `disabled`, `not_confirmed`, `no_center`, `no_radius`, `resume`, `clear`) and the aircraft that caused it. A reason change within BLACKOUT is logged too.
+- Every transition is logged with reason (`aircraft`, `no_data`, `test`, `schedule`, `disabled`, `not_confirmed`, `no_center`, `no_zone`, `resume`, `clear`) and the aircraft that caused it. A reason change within BLACKOUT is logged too.
 
-Units: radius in miles or nautical miles or km (user choice, default statute miles), altitude in feet.
+Units: zone distances and the map range in miles or nautical miles or km (user choice, default statute miles), altitude in feet.
 
 ## Fixture model and blackout output
 
@@ -383,7 +395,7 @@ FPP has no way for a plugin to raise a banner warning: warnings are raised only 
 | `internal_error` / `internal_ok` | The main loop hits an unexpected error / a step completes normally | Raise / clear warning + log |
 | `plugin_disabled` / `plugin_enabled` | Disable / Enable command | Raise / clear "SkyGuard disabled" + log |
 | `center_unset` / `center_set` | Center missing / provided | Raise / clear warning + log |
-| `radius_unset` / `radius_set` | A required radius is missing / all are entered | Raise / clear warning + log |
+| `zone_unset` / `zone_set` | A required zone is missing / all are entered | Raise / clear warning + log |
 | `personal_use_required` / `personal_use_confirmed` | Enabled and not confirmed / confirmed | Raise / clear warning + log |
 | `online_check_lost` / `online_check_ok` | The online check on a working receiver has delivered nothing new for three intervals during a show / it delivers again, or isn't needed | Raise / clear warning + log. Never a blackout by itself |
 | `ground_aircraft_ignored` | An aircraft in the zone is first skipped as on the ground | Log |
@@ -433,7 +445,7 @@ A `callbacks` script is required so commands live-register on install without an
 
 Served through the template's `api.php` at `/api/plugin/fpp-plugin-SkyGuard/status`, reading a status JSON the daemon rewrites (atomic write in `plugindata/`). It writes at once when the state, reason, enabled setting, show window, active feed, in-zone count or warnings change, and otherwise every 5 s. That matches the 5 s map refresh and spares the SD card a write every second all year.
 
-Fields: `state`, `reason`, `enabled`, `in_schedule`, `source_mode`, `cross_check_active`, `active_feed`, `receiver_ok`, `receivers[]`, `last_data_age_s`, `aircraft_in_zone`, `aircraft_in_radius`, `map_range`, `center`, `radius`, `aircraft[]` (normalized records with `distance` and `in_zone`), `fixtures[]` (name, resolved channels, valid), `warnings[]`, `notices[]`, `message_test`, `events[]`, `held_channels[]`, `updated_at`. `held_channels` lists the channels being forced right now; FPP has no call that reads an overlay range back, so this is how the page and a test can tell. `events` is the last 20 blackout starts and ends, each with `at`, `type` (`started` or `ended`), `reason` and at most 10 `aircraft`, kept across a daemon restart by reading them back from the status file. `radius` carries the `value` in force for the active feed, its `unit`, and the `online` and `receiver` settings. `receivers` has one entry per receiver while the receiver is the active feed and its last poll worked: `band` (`1090` or `978`), `aircraft` (count, or null with no data) and `state` (`ok`, `behind` for 978 data more than 5 s behind 1090 on this box and so not merged, or `missing`). The Health section shows each as a row; it is display only. `aircraft_in_radius` counts aircraft with a position inside the radius that judges them (the online radius for one only the online check saw, otherwise the active feed's), at any altitude; the page shows it under the map with `aircraft_in_zone` and how many only online data saw, which the map circles.
+Fields: `state`, `reason`, `enabled`, `in_schedule`, `source_mode`, `cross_check_active`, `active_feed`, `receiver_ok`, `receivers[]`, `last_data_age_s`, `aircraft_in_zone`, `aircraft_in_area`, `map_range`, `center`, `unit`, `zones[]`, `aircraft[]` (normalized records with `distance`, `in_zone` and `zones`), `fixtures[]` (name, resolved channels, valid), `warnings[]`, `notices[]`, `message_test`, `events[]`, `held_channels[]`, `visits_open[]`, `updated_at`. `held_channels` lists the channels being forced right now; FPP has no call that reads an overlay range back, so this is how the page and a test can tell. `events` is the last 20 blackout starts and ends, each with `at`, `type` (`started` or `ended`), `reason` and at most 10 `aircraft`, kept across a daemon restart by reading them back from the status file. `zones` has one entry per complete zone: `id` (`receiver1`, `receiver2`, `online`), `label`, `feed`, `north`, `south`, `east`, `west` in `unit`, `alt_floor_ft`, `alt_ceiling_ft`, `active` (it judges the active feed now) and `aircraft_in_zone`. `visits_open` lists the zone visits in progress, as in the zone log. `receivers` has one entry per receiver while the receiver is the active feed and its last poll worked: `band` (`1090` or `978`), `aircraft` (count, or null with no data) and `state` (`ok`, `behind` for 978 data more than 5 s behind 1090 on this box and so not merged, or `missing`). The Health section shows each as a row; it is display only. `aircraft_in_area` counts aircraft with a position inside a box of the zones that judge them (the online zone for one only the online check saw, otherwise the active feed's), at any altitude; the page shows it under the map with `aircraft_in_zone` and how many only online data saw, which the map circles.
 
 Each `aircraft[]` record also carries `ground_ignored`, and a `note` of `ground (ignored)` when that is true.
 
@@ -441,7 +453,15 @@ Each `aircraft[]` record also carries `ground_ignored`, and a `note` of `ground 
 
 `center` is needed by the map, so the home coordinates remain readable by anyone who can reach FPP's API, even though they are stored privately. The API key is never returned.
 
-The `aircraft[]` list covers everything the feed returns within the map range (`map_range`, default 25 in the radius unit, and never less than the radius that judges the aircraft), plus aircraft with no position, so the map shows what is approaching. Online queries cover the larger of twice the online radius and the map range. The map range is display only. Document the route in `apiDocs.json`.
+The `aircraft[]` list covers everything the feed returns within the map range (`map_range`, default 25 in the distance unit), plus any aircraft inside a box that judges it however far out, and aircraft with no position, so the map shows what is approaching. Online queries cover the larger of twice the distance to the online zone's farthest corner and the map range. The map range is display only. Document the route in `apiDocs.json`.
+
+### Zone log
+
+Every aircraft that passes through a zone is logged, at any time data is fresh, whether or not a show is running or SkyGuard is enabled (owner, Nov 17, 2026). A visit starts on the first poll that counts the aircraft in a zone (inside its box and its altitude band, by the same rules as a blackout, so ground traffic the filter ignores isn't logged) and ends once it hasn't counted there for 30 s, so a missed poll doesn't split it. An aircraft in two zones has a visit in each. Stale data never extends a visit.
+
+- **File:** `plugindata/fpp-plugin-SkyGuard/zone_visits.jsonl`, one JSON line per finished visit: `zone`, `hex`, `callsign` (the latest one heard), `source`, `entered`, `left` (seconds since the epoch), `seconds` inside, and `alt_entry_ft`, `alt_min_ft`, `alt_max_ft` (reported altitude in feet, or `ground`). Appended, never rewritten except by the trim: once a day and at start, visits older than 90 days are dropped and at most 20,000 kept. A clean stop writes the visits in progress.
+- **Route:** `GET /api/plugin/fpp-plugin-SkyGuard/visits?limit=N`, newest first, N from 1 to 1000 (default 100), or `limit=all` for the CSV. Read-only.
+- **Status page:** a Zone log table (zone, callsign, entered, time inside, altitude in / low / high, receiver or online data) with the visits in progress first, marked "inside now", a zone filter and a Download CSV button. A cell that a spreadsheet would read as a formula is prefixed with `'`.
 
 ### Geocode endpoint
 
@@ -468,11 +488,13 @@ Every setting below lives in `config/plugin.fpp-plugin-SkyGuard` except the fixt
 | `health_fail_count` | 2 | Misses before fallback |
 | `max_data_age_s` | 5 | 0 = blackout on first failed poll, or after the poll interval plus timeout with no success |
 | `center_lat` / `center_lon` | empty | **Private.** Plugin stays IDLE with a warning until set |
-| `radius` | none | User must enter it. Used with online data |
-| `radius_receiver` | none | User must enter it. Used while a receiver is the active feed |
-| `radius_unit` | mi | `mi`, `nm`, `km`. Applies to both, and to the map range |
-| `map_range` | 25 | 1–250, in the radius unit. How far out the map and list show aircraft; the status map's view fits it. Display only: blackouts use the radius |
-| `alt_floor_ft` / `alt_ceiling_ft` | 0 / 10000 | Heights above the show, inclusive; a floor of 0 or less means no floor |
+| `zone1_north`, `zone1_south`, `zone1_east`, `zone1_west` | none | Receiver zone 1, 0–250 each. User must enter them when a receiver is in use |
+| `zone2_enabled` | off | Use receiver zone 2 |
+| `zone2_north` … `zone2_west` | none | Receiver zone 2, 0–250 each. Used only while `zone2_enabled` is on |
+| `online_zone_north` … `online_zone_west` | none | The online zone, 0–250 each. User must enter them when online data is in use |
+| `radius_unit` | mi | `mi`, `nm`, `km`. The distance unit for every zone and the map range |
+| `map_range` | 25 | 1–250, in the distance unit. How far out the map and list show aircraft; the status map's view fits it. Display only: blackouts use the zones |
+| `<zone>_alt_floor_ft` / `<zone>_alt_ceiling_ft` | 0 / 10000 | Per zone (`zone1`, `zone2`, `online_zone`). Heights above the show, inclusive; a floor of 0 or less means no floor; a floor above the ceiling uses the default band with a warning |
 | `show_elevation_ft` | 0 | The show's ground elevation above sea level, −1500 to 15000. Look it up sends the saved center point to api.open-meteo.com (Copernicus DEM, 90 m) once, only when pressed. 0 measures from sea level |
 | `count_no_position` | true | Aircraft with altitude but no position count as in zone |
 | `ignore_ground` | false | Skip aircraft on the ground; see Ignoring ground traffic |
@@ -493,7 +515,7 @@ A `privacy` block is required for listing; generate it with the [Privacy disclos
 ### Fields to set
 
 - `repoName`: `fpp-plugin-SkyGuard`; `name`: SkyGuard.
-- `description`: one or two sentences saying it blacks out moving-head light output when aircraft are within a set radius, using a local ADS-B receiver or online flight data.
+- `description`: one or two sentences saying it blacks out moving-head light output when aircraft are inside zones you set, using a local ADS-B receiver or online flight data.
 - `versions[]`: minimum FPP 9.5, with no `platforms` key, so it installs on any platform FPP runs on. SkyGuard needs no particular hardware, and listing boards kept it off virtual machines. It relies on Linux's `/proc` to find its own processes, so macOS isn't expected to work properly.
 - `dependencies`: declare any pip/apt packages (FPP 10+ only; also install them in `fpp_install.sh` for 9.5).
 - Category: chosen in the fpp-data listing request, not in this file. Use `Hardware` (Hardware, Controls & Animatronics) unless a reviewer prefers otherwise.
@@ -562,7 +584,7 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 - Shown at the top of the Settings page until every step is completed or skipped.
 - It opens with a confirmation that SkyGuard is for personal use only, which sets `personal_use_confirmed`. It has no Skip, because the plugin stays idle without it.
 - Steps in order: 1 Data feed (no answer is highlighted, and skipping it keeps the receiver-only default), 2 Location & zone, 3 Fixtures, 4 Matrix message, 5 Test run (fires SkyGuard Test Trigger). Each of these has a Skip option.
-- The Data feed step starts by asking whether the user has their own ADS-B receiver. No selects `online` mode, and receiver settings and the receiver radius aren't shown or required anywhere. Yes then asks whether to use online data as a fallback (`both`) or the receiver alone (`receiver`).
+- The Data feed step starts by asking whether the user has their own ADS-B receiver. No selects `online` mode, and receiver settings and the receiver zones aren't shown or required anywhere. Yes then asks whether to use online data as a fallback (`both`) or the receiver alone (`receiver`).
 - Progress stored in a `setup_state` setting. No "run setup again" link afterwards; skipped items are set from the tabs.
 
 ### Settings page tabs
@@ -570,7 +592,7 @@ The UI is built after the backend passes its tests (phase 1b). It is phone-first
 | Tab | Contents |
 | --- | --- |
 | Data Source | Source mode; receiver URL and optional 978 URL with a Test button (shows aircraft seen or the error); online provider dropdown, masked API key field, Test button |
-| Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); a note on finding coordinates in Google Maps; display-only map of the center point and radius circle (no draggable pin); online radius and receiver radius as required entries with no pre-filled value, shown according to the data sources in use, and their unit; the lag notice when online data is selected; altitude floor and ceiling; "Ignore aircraft on the ground" switch |
+| Location & Zone | Lat/lon fields; address field + Look up button (shows candidates to pick from); a note on finding coordinates in Google Maps; display-only map of the center point and the zone boxes (no draggable pin); the distance unit; a card per zone, shown according to the data sources in use, with north, south, east and west distances (required entries with no pre-filled value) and its lowest and highest altitude; a switch for receiver zone 2, whose card shows only while it is on; the lag notice when online data is selected; "Ignore aircraft on the ground" switch |
 | Fixtures | Table, one row per head: name, model (from FPP's model list) or start channel, dimmer ch, dimmer off, shutter ch, shutter off, enabled. Under the model, the FPP channels the daemon worked out, from status. If FPP has no head models, a note says how to upload them from xLights with FPP Connect (Models column set to All). Add, duplicate, delete. Per-row Test button blacks out that head only for 3 s |
 | Matrix Message | Enable switch; panel picker from the FPP overlay model list; message field with click-to-insert placeholder buttons; live preview with sample values; Test on panels and Stop buttons, with a live view of the first ticked panel's real pixels during the test, also shown when the page is opened during one; no-data message; color, font, size, speed |
 | Advanced (collapsed) | Poll interval, online idle interval, health interval, fail count, max data age, release delay, count-no-position toggle, ground speed limit, units |
@@ -583,11 +605,12 @@ Top to bottom on a phone:
 
 1. **State badge:** CLEAR, BLACKOUT or IDLE with its reason, in Bootstrap semantic colors.
 2. **Controls:** Enable/Disable button (confirmation before disabling), Test Trigger button (off while disabled) and the aircraft list button.
-3. **Map:** a radar scope, dark in both themes, built only from Bootstrap's fixed palette (`--bs-gray-900`, `--bs-teal` and so on), with the map tiles grey, inverted and faint underneath. Range rings at a round step out to the map range, with labels and a crosshair; a slow sweep over that range, left out under `prefers-reduced-motion`. A circle for each radius that applies to the data sources chosen (online pink, receiver cyan; the one in use is solid and lightly filled, the other dashed). Each aircraft is a blip: a glowing dot, a diamond for category `A7`, with a short line toward its heading when it reports one; red in the zone, grey when `ground (ignored)`, and an amber ring when only online data saw it (the receiver missed it). Under the map, a legend panel joined to it explains every blip, ring and radius, and a line counts the aircraft inside the radius in use and in the zone; in-zone aircraft highlighted and labeled with callsign, altitude and speed, and any other aircraft shows its label when tapped or clicked, which lasts through each refresh, because labels on every aircraft hide each other; skipped ones marked `ground (ignored)`. Refreshes every 5 s from the status endpoint. When the newest data is older than twice the online interval outside a show plus 10 s, no aircraft are drawn or listed and a note says why: online data stops while disabled, and the status still holds the last aircraft seen.
-4. **No-internet fallback:** if map tiles don't load, the same scope as a plain radar plot (range rings, radius circles, sweep, blips) drawn from the same data. The Location & Zone tab's map has no aircraft and stays a plain map, for placing the center.
-5. **Aircraft list:** a full-screen list (callsign, altitude, speed, distance, in zone, or `ground (ignored)`) with a Back button, which the browser's own back also closes; same 5 s refresh.
+3. **Map:** a radar scope, dark in both themes, built only from Bootstrap's fixed palette (`--bs-gray-900`, `--bs-teal` and so on), with the map tiles grey, inverted and faint underneath. Range rings at a round step out to the map range, with labels and a crosshair; a slow sweep over that range, left out under `prefers-reduced-motion`. A box for each zone that applies to the data sources chosen (receiver zone 1 cyan, receiver zone 2 orange, online pink; those in use are solid and lightly filled, the others dashed). Each aircraft is a blip: a glowing dot, a diamond for category `A7`, with a short line toward its heading when it reports one; red in the zone, grey when `ground (ignored)`, and an amber ring when only online data saw it (the receiver missed it). Under the map, a legend panel joined to it explains every blip, ring and zone (with its reach and altitudes), and a line counts the aircraft inside the zones in use and in the zone, and says how many of those have no position; in-zone aircraft highlighted and labeled with callsign, altitude and speed, and any other aircraft shows its label when tapped or clicked, which lasts through each refresh, because labels on every aircraft hide each other; skipped ones marked `ground (ignored)`. Refreshes every 5 s from the status endpoint. When the newest data is older than twice the online interval outside a show plus 10 s, no aircraft are drawn or listed and a note says why: online data stops while disabled, and the status still holds the last aircraft seen.
+4. **No-internet fallback:** if map tiles don't load, the same scope as a plain radar plot (range rings, zone boxes, sweep, blips) drawn from the same data. The Location & Zone tab's map has no aircraft and stays a plain map, for placing the center.
+5. **Aircraft list:** a full-screen list (callsign, altitude, speed, distance, in zone with the zones it counts in, or `ground (ignored)`) with a Back button, which the browser's own back also closes; same 5 s refresh.
 6. **Health:** active feed, receiver health, data age, aircraft count, whether a show is running, per-fixture status (including "Held dark" from `held_channels`). Current warnings sit under the state badge.
-7. **Recent events:** last 20 blackout transitions with time, reason and aircraft.
+7. **Zone log:** see Zone log under the status endpoint.
+8. **Recent events:** last 20 blackout transitions with time, reason and aircraft.
 
 ### Help page
 
@@ -650,6 +673,12 @@ Seen on the real 10.3 box:
 7c. Both radii are user entered, with no defaults and no fallback between them.
 8. Add an optional ground-traffic filter (`ignore_ground`, `ground_speed_limit_kt`), off by default. It requires a `ground` report, with a speed below the limit or no speed, and uses no numeric altitude, airport elevation or aircraft type. Helicopters below the limit are counted unless they report `ground`.
 
+### Owner decisions, Nov 17, 2026
+
+1. Zones are boxes, measured north, south, east and west from the center point, each with its own altitude band, replacing the circles.
+2. Two receiver zones (the second optional) and one online zone, because receivers have little or no lag.
+3. Every visit to a zone is logged by callsign, altitude and time inside, whenever data comes in, with a table and CSV on the status page.
+
 ### Owner decisions, Nov 8, 2026
 
 After a whole-plugin review by three reviewers:
@@ -662,7 +691,7 @@ After a whole-plugin review by three reviewers:
 
 ### Known risks to review during acceptance
 
-- **Airport inside the radius:** with the default floor of 0, ground traffic counts. In one live sample around Heathrow, 28 of 42 aircraft were on the ground, so a nearby airport could keep the heads dark for the whole show. `ignore_ground` is the control for this, and raising `alt_floor_ft` also excludes `ground` aircraft.
+- **Airport inside a zone:** with the default floor of 0, ground traffic counts. In one live sample around Heathrow, 28 of 42 aircraft were on the ground, so a nearby airport could keep the heads dark for the whole show. `ignore_ground` is the control for this, and raising a zone's floor also excludes `ground` aircraft.
 - **False `ground` reports with `ignore_ground` on:** see the limits under Ignoring ground traffic.
 - **Far-away aircraft with no position:** see `count_no_position` above.
 - **Unprotected cases:** Channel Tester and the crash-during-CLEAR gap.
@@ -671,10 +700,10 @@ After a whole-plugin review by three reviewers:
 
 Phase 1 is done when every test below passes on a Pi 4 running FPP 9.5 and on current FPP release and nightly. Use a mock feed server (replays recorded `aircraft.json` files) so tests are repeatable without real traffic.
 
-- [ ] Aircraft enters radius within altitude band → dimmer/shutter forced to off values on the next poll; pan/tilt/color keep following the sequence
+- [ ] Aircraft enters a zone within that zone's altitude band → dimmer/shutter forced to off values on the next poll; pan/tilt/color keep following the sequence
 - [ ] Aircraft above ceiling or below floor → no blackout
-- [ ] Aircraft reporting "ground" inside radius with floor 0 → blackout
-- [ ] `ignore_ground` on: aircraft reporting "ground" below `ground_speed_limit_kt` inside radius → no blackout; shown as `ground (ignored)` in status and logged
+- [ ] Aircraft reporting "ground" inside a zone with floor 0 → blackout
+- [ ] `ignore_ground` on: aircraft reporting "ground" below `ground_speed_limit_kt` inside a zone → no blackout; shown as `ground (ignored)` in status and logged
 - [ ] `ignore_ground` on: aircraft reporting "ground" reaches `ground_speed_limit_kt` on its takeoff roll → blackout on that poll
 - [ ] `ignore_ground` on: slow aircraft reporting a numeric altitude, such as a hovering helicopter → blackout
 - [ ] `ignore_ground` on: aircraft or surface vehicle reporting "ground" with no speed → no blackout; shown as `ground (ignored)`
@@ -694,8 +723,12 @@ Phase 1 is done when every test below passes on a Pi 4 running FPP 9.5 and on cu
 - [ ] Daemon killed mid-blackout with a fixture removed while it is down → that fixture's channel is still released
 - [ ] On FPP 9.5 and 10.2, release after an fppd restart never produces a full-on channel
 - [ ] Online feed outside the show window polls about every 30 s, inside it at the provider's rate with no refusals for a whole show, with an immediate poll at show start; no online requests while disabled or before personal use is confirmed; receiver polling stays fast throughout
-- [ ] `both` mode with both radii entered: the radius in force changes when the feed falls back and when it returns
-- [ ] A required radius not entered: IDLE with reason `no_radius` and a warning, and no online requests; entering it starts protection without a restart
+- [ ] `both` mode with every zone entered: the zones in force change when the feed falls back and when it returns
+- [ ] A required zone not entered: IDLE with reason `no_zone` and a warning, and no online requests; entering it starts protection without a restart
+- [ ] A lopsided zone (for example 1 mi north, 6 mi south): an aircraft 3 mi south blacks out, one 3 mi north doesn't
+- [ ] Receiver zone 2 with its own band: an aircraft inside only zone 2 blacks out within zone 2's altitudes and not outside them; switching zone 2 off stops it
+- [ ] Updating from a radius install: the zones match the old radii as squares and the band is copied, with no gap in protection
+- [ ] Zone log: an aircraft passing through a zone appears with callsign, altitudes and time inside once it has left for 30 s; it shows "inside now" while inside; the CSV opens in a spreadsheet
 - [ ] First-run: on every setup the plugin stays IDLE with a warning until personal use is confirmed, then starts without a restart; the lag notice shows whenever online data is selected
 - [ ] A USB DMX head using `start_channel` blacks out correctly
 - [ ] Header indicator always shows, says ON, OFF or NOT RUNNING, and adds any warnings

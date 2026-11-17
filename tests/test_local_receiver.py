@@ -22,6 +22,7 @@ from skyguard.feeds.receiver import (
     read_local_file,
 )
 from skyguard.notifier import Notifier, WarningSink
+from tests.zones import zone_settings
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PLANE = {"hex": "a1", "alt_baro": 3000, "lat": 40.0, "lon": -75.0, "seen_pos": 0.5}
@@ -173,7 +174,7 @@ class FeedManagerTests(Files):
         values = {"source_mode": "receiver", "receiver_url": LOCAL_RECEIVER, "radius_receiver": 5.0}
         values.update(overrides)
         manager = FeedManager(
-            Settings(**values),
+            zone_settings(**values),
             Notifier([WarningSink()]),
             fetch=self.fail_network,
             clock=lambda: self.time,

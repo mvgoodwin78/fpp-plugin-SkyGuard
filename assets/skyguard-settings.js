@@ -105,6 +105,10 @@ function skyGuardSettingSaved(key) {
         document.querySelectorAll('[data-show-with="online"]').forEach(function (element) {
             element.hidden = !usesOnline;
         });
+        var second = byId('zone2_enabled');
+        document.querySelectorAll('[data-show-with="zone2"]').forEach(function (element) {
+            element.hidden = !usesReceiver || !(second && second.checked);
+        });
         var location = byId('receiver_location');
         var here = location ? location.value === 'this_box' : false;
         document.querySelectorAll('[data-show-with="receiver-here"]').forEach(function (element) {
@@ -1021,7 +1025,7 @@ function skyGuardSettingSaved(key) {
             },
             {
                 title: 'Location & zone',
-                text: 'Set the center point and enter a radius for each data source you use. SkyGuard stays idle until you do. You can also fill in anything else on this tab.',
+                text: 'Set the center point and enter the zone for each data source you use: how far it reaches north, south, east and west, and its altitudes. SkyGuard stays idle until you do. You can also fill in anything else on this tab.',
                 tab: 'skyGuardTabLocation',
                 skippable: true
             },

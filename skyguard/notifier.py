@@ -31,7 +31,7 @@ _WARNING_MESSAGES = {
     "online_check_lost": "Online data isn't answering, so aircraft your receiver misses won't be caught. Your receiver is still protecting the show.",
     "no_fixtures": "No moving heads are set up, so a blackout has nothing to black out.",
     "message_test_on": "A test message is showing on the panels until you stop it on the Matrix Message tab.",
-    "radius_unset": "Enter a radius for each data source in use. SkyGuard stays idle until you do.",
+    "zone_unset": "Enter the zone for each data source in use: receiver zone 1 with your receiver, the online zone with online data. SkyGuard stays idle until you do.",
     "personal_use_required": "SkyGuard is for personal use only. It stays idle until you confirm this in its setup.",
 }
 
@@ -46,7 +46,7 @@ _RAISES = {
     "no_fixtures": "no_fixtures",
     "online_check_lost": "online_check_lost",
     "message_test_on": "message_test_on",
-    "radius_unset": "radius_unset",
+    "zone_unset": "zone_unset",
     "personal_use_required": "personal_use_required",
     "overlay_failed": "overlay_failed",
     "supervisor_lost": "supervisor_lost",
@@ -64,7 +64,7 @@ _CLEARS = {
     "fixtures_set": ("no_fixtures",),
     "online_check_ok": ("online_check_lost",),
     "message_test_off": ("message_test_on",),
-    "radius_set": ("radius_unset",),
+    "zone_set": ("zone_unset",),
     "personal_use_confirmed": ("personal_use_required",),
     "overlay_restored": ("overlay_failed",),
     "internal_ok": ("internal_error",),

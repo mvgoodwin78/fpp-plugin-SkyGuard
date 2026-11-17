@@ -6,7 +6,7 @@ It contains no API key. It does contain the center point, because the map needs 
 import json
 import logging
 
-from .config import FEED_ONLINE, FEED_RECEIVER
+from .config import FEED_RECEIVER
 from .feeds.base import GROUND
 from .geo import from_nm
 from .notifier import LOGGER_NAME
@@ -49,30 +49,36 @@ def _aircraft_entry(evaluated, settings, feed):
         "category": record.category,
         "distance": distance,
         "in_zone": evaluated.in_zone,
+        "zones": list(evaluated.zones),
         "ground_ignored": evaluated.ground_ignored,
         "note": evaluated.note,
         "online_only": _online_only(evaluated, feed),
     }
 
 
-def _judging_radius_nm(evaluated, settings, feed):
-    """The radius this aircraft is judged by: the online one for an aircraft only the online
-    check saw, otherwise the active feed's."""
-    return settings.radius_nm_for(FEED_ONLINE if _online_only(evaluated, feed) else feed)
-
-
-def _in_display_range(evaluated, settings, feed):
-    """The map range, display only, but never less than the radius the aircraft is judged by."""
+def _in_display_range(evaluated, settings):
+    """The map range, display only, and anything inside a zone that judges it however far."""
     if evaluated.distance_nm is None:
         return True  # no position: list it, since it may be what is holding a blackout
-    radius_nm = _judging_radius_nm(evaluated, settings, feed) or 0.0
-    return evaluated.distance_nm <= max(settings.map_range_nm, radius_nm)
+    return evaluated.in_area or evaluated.distance_nm <= settings.map_range_nm
 
 
-def _in_radius(evaluated, settings, feed):
-    """Inside the radius, at any altitude. Aircraft with no position aren't counted."""
-    radius_nm = _judging_radius_nm(evaluated, settings, feed)
-    return evaluated.distance_nm is not None and radius_nm is not None and evaluated.distance_nm <= radius_nm
+def _zone_entry(zone, feed, in_zone_counts):
+    return {
+        "id": zone.id,
+        "label": zone.label,
+        "feed": zone.feed,
+        "north": zone.north,
+        "south": zone.south,
+        "east": zone.east,
+        "west": zone.west,
+        "alt_floor_ft": zone.alt_floor_ft,
+        "alt_ceiling_ft": zone.alt_ceiling_ft,
+        # Whether it judges the active feed's aircraft right now. The online zone also judges
+        # aircraft only the online check saw.
+        "active": zone.feed == feed,
+        "aircraft_in_zone": in_zone_counts.get(zone.id, 0),
+    }
 
 
 def recent_events(events, event):
@@ -109,9 +115,14 @@ def build_status(
     message_test=False,
     events=(),
     held_channels=(),
+    visits_open=(),
 ):
     aircraft = zone.aircraft if zone is not None else ()
     feed = feed_state.active_feed
+    in_zone_counts = {}
+    for evaluated in aircraft:
+        for zone_id in evaluated.zones:
+            in_zone_counts[zone_id] = in_zone_counts.get(zone_id, 0) + 1
     return {
         "state": state,
         "reason": reason,
@@ -125,20 +136,16 @@ def build_status(
         ],
         "last_data_age_s": None if data_age_s is None else round(data_age_s, 1),
         "aircraft_in_zone": len(zone.in_zone) if zone is not None else 0,
-        "aircraft_in_radius": sum(1 for a in aircraft if _in_radius(a, settings, feed)),
+        "aircraft_in_area": sum(1 for a in aircraft if a.in_area),
         "map_range": settings.map_range,
         "center": {"lat": settings.center_lat, "lon": settings.center_lon},
-        "radius": {
-            "value": settings.radius_for(feed),
-            "unit": settings.radius_unit,
-            "online": settings.radius,
-            "receiver": settings.radius_receiver,
-        },
+        "unit": settings.radius_unit,
+        "zones": [_zone_entry(z, feed, in_zone_counts) for z in settings.zones],
         "cross_check_active": feed_state.cross_check_active,
         "aircraft": [
             _aircraft_entry(a, settings, feed)
             for a in aircraft
-            if _in_display_range(a, settings, feed)
+            if _in_display_range(a, settings)
         ],
         "fixtures": [
             {
@@ -158,6 +165,7 @@ def build_status(
         "message_test": message_test,
         "events": list(events),
         "held_channels": list(held_channels),
+        "visits_open": list(visits_open),
         "updated_at": updated_at,
     }
 

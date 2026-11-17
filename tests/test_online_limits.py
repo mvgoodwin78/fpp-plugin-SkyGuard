@@ -1,5 +1,5 @@
-"""Rules that came from testing on a real box: provider rates, data age, Retry-After, the second
-radius, the lag notice and the personal-use confirmation."""
+"""Rules that came from testing on a real box: provider rates, data age, Retry-After, the zones
+for each feed, the lag notice and the personal-use confirmation."""
 
 import json
 import os
@@ -18,6 +18,7 @@ from skyguard.geo import to_nm
 from skyguard.notifier import Notifier, WarningSink
 from tests.fake_fpp_server import FakeFpp
 from tests.mock_feed_server import MockFeedServer
+from tests.zones import zone_settings
 
 RX = "http://rx/aircraft.json"
 CENTER = {"center_lat": 40.0, "center_lon": -75.0}
@@ -50,7 +51,7 @@ class Rig:
             **values,
         }
         self.manager = FeedManager(
-            Settings(**settings), Notifier([self.sink]), fetch=self.net.fetch, clock=lambda: self.time
+            zone_settings(**settings), Notifier([self.sink]), fetch=self.net.fetch, clock=lambda: self.time
         )
         self.manager.set_in_schedule(True)
 
@@ -168,7 +169,7 @@ class RetryAfterTests(unittest.TestCase):
         rig.net.error = None
         count = len(rig.net.calls)
         rig.manager.update_settings(
-            Settings(source_mode="online", personal_use_confirmed=True, online_provider="adsb.lol", **ZONE)
+            zone_settings(source_mode="online", personal_use_confirmed=True, online_provider="adsb.lol", **ZONE)
         )
         rig.manager.poll_once()
         self.assertEqual(len(rig.net.calls), count + 1)
@@ -201,68 +202,129 @@ class RetryAfterTests(unittest.TestCase):
             self.assertEqual(caught.exception.retry_after, expected, value)
 
 
-class RadiusSettingTests(unittest.TestCase):
-    def test_neither_radius_has_a_default_or_borrows_the_other(self):
-        self.assertIsNone(Settings().radius)
-        self.assertIsNone(Settings().radius_receiver)
-        online_only = load_settings({"radius": "12"})
-        self.assertIsNone(online_only.radius_for(FEED_RECEIVER))
-        self.assertEqual(online_only.radius_for(FEED_ONLINE), 12.0)
-        receiver_only = load_settings({"radius_receiver": "9"})
-        self.assertIsNone(receiver_only.radius_for(FEED_ONLINE))
-        self.assertEqual(receiver_only.radius_for(FEED_RECEIVER), 9.0)
+def zone_keys(prefix, north, south, east, west, floor=None, ceiling=None):
+    values = {f"{prefix}_north": north, f"{prefix}_south": south, f"{prefix}_east": east, f"{prefix}_west": west}
+    if floor is not None:
+        values[f"{prefix}_alt_floor_ft"] = floor
+    if ceiling is not None:
+        values[f"{prefix}_alt_ceiling_ft"] = ceiling
+    return values
+
+
+class ZoneSettingTests(unittest.TestCase):
+    """Receiver zones 1 and 2, and the online zone: four distances and an altitude band each."""
+
+    def test_no_zone_has_a_default_or_borrows_another(self):
+        self.assertEqual(Settings().zones, ())
+        online_only = load_settings(zone_keys("online_zone", "5", "5", "5", "5"))
+        self.assertEqual(online_only.zones_for(FEED_RECEIVER), ())
+        self.assertEqual([z.id for z in online_only.zones_for(FEED_ONLINE)], ["online"])
+        receiver_only = load_settings(zone_keys("zone1", "3", "1", "2", "4"))
+        self.assertEqual(receiver_only.zones_for(FEED_ONLINE), ())
+        zone = receiver_only.zone("receiver1")
+        self.assertEqual((zone.north, zone.south, zone.east, zone.west), (3.0, 1.0, 2.0, 4.0))
         self.assertEqual(online_only.warnings, ())
 
-    def test_which_radii_are_required_depends_on_the_sources_in_use(self):
+    def test_which_zones_are_required_depends_on_the_sources_in_use(self):
+        online = zone_keys("online_zone", "8", "8", "8", "8")
+        receiver = zone_keys("zone1", "3", "3", "3", "3")
+        second = {"zone2_enabled": "1", **zone_keys("zone2", "6", "6", "6", "6")}
         for values, expected in (
             ({"source_mode": "online"}, False),
-            ({"source_mode": "online", "radius": "13"}, True),
-            ({"source_mode": "online", "radius_receiver": "10"}, False),
+            ({"source_mode": "online", **online}, True),
+            ({"source_mode": "online", **receiver}, False),
             ({"source_mode": "receiver"}, False),
-            ({"source_mode": "receiver", "radius_receiver": "10"}, True),
-            ({"source_mode": "receiver", "radius": "13"}, False),
-            ({"source_mode": "both", "receiver_url": RX, "radius": "13"}, False),
-            ({"source_mode": "both", "receiver_url": RX, "radius_receiver": "10"}, False),
-            ({"source_mode": "both", "receiver_url": RX, "radius": "13", "radius_receiver": "10"}, True),
-            ({"source_mode": "both", "radius": "13"}, True),  # no receiver entered, so online only
+            ({"source_mode": "receiver", **receiver}, True),
+            ({"source_mode": "receiver", **second}, False),  # zone 2 alone isn't enough
+            ({"source_mode": "receiver", **online}, False),
+            ({"source_mode": "both", "receiver_url": RX, **online}, False),
+            ({"source_mode": "both", "receiver_url": RX, **receiver}, False),
+            ({"source_mode": "both", "receiver_url": RX, **online, **receiver}, True),
+            ({"source_mode": "both", **online}, True),  # no receiver entered, so online only
         ):
             with self.subTest(values=values):
-                self.assertEqual(load_settings(values).radius_ready, expected)
+                self.assertEqual(load_settings(values).zones_ready, expected)
 
-    def test_a_missing_radius_gives_no_crash_on_conversion(self):
-        self.assertIsNone(Settings().radius_nm)
-        self.assertIsNone(Settings().radius_nm_for(FEED_RECEIVER))
+    def test_zone_2_is_used_only_when_switched_on(self):
+        values = {"source_mode": "receiver", **zone_keys("zone1", "3", "3", "3", "3"), **zone_keys("zone2", "1", "9", "1", "1")}
+        self.assertIsNone(load_settings(values).zone("receiver2"))
+        on = load_settings({**values, "zone2_enabled": "1"})
+        self.assertEqual([z.id for z in on.zones_for(FEED_RECEIVER)], ["receiver1", "receiver2"])
 
-    def test_each_feed_gets_its_own(self):
-        s = load_settings({"radius": "13", "radius_receiver": "10"})
-        self.assertEqual(s.radius_for(FEED_RECEIVER), 10.0)
-        self.assertEqual(s.radius_for(FEED_ONLINE), 13.0)
+    def test_each_zone_has_its_own_altitude_band(self):
+        s = load_settings({
+            **zone_keys("zone1", "3", "3", "3", "3", "0", "2000"),
+            "zone2_enabled": "1",
+            **zone_keys("zone2", "6", "6", "6", "6", "1500", "6000"),
+            **zone_keys("online_zone", "8", "8", "8", "8", "0", "9000"),
+        })
+        self.assertEqual(
+            [(z.alt_floor_ft, z.alt_ceiling_ft) for z in s.zones],
+            [(0.0, 2000.0), (1500.0, 6000.0), (0.0, 9000.0)],
+        )
 
-    def test_the_unit_applies_to_both(self):
-        s = load_settings({"radius": "20", "radius_receiver": "10", "radius_unit": "km"})
-        self.assertAlmostEqual(s.radius_nm_for(FEED_RECEIVER), to_nm(10, "km"))
-        self.assertAlmostEqual(s.radius_nm_for(FEED_ONLINE), to_nm(20, "km"))
+    def test_a_band_upside_down_uses_the_default_with_a_warning(self):
+        s = load_settings(zone_keys("zone1", "3", "3", "3", "3", "5000", "1000"))
+        self.assertEqual((s.zone("receiver1").alt_floor_ft, s.zone("receiver1").alt_ceiling_ft), (0.0, 10000.0))
+        self.assertTrue(any("Receiver zone 1" in w for w in s.warnings))
 
-    def test_online_queries_use_the_online_radius(self):
-        s = load_settings({"radius": "13", "radius_receiver": "1", "radius_unit": "nm"})
-        self.assertEqual(s.radius_nm, 13.0)
+    def test_a_missing_distance_leaves_the_zone_unset_with_a_warning(self):
+        s = load_settings({"zone1_north": "3", "zone1_south": "3", "zone1_east": "3", "zone1_west": ""})
+        self.assertIsNone(s.zone("receiver1"))
+        self.assertTrue(any("all four distances" in w for w in s.warnings))
 
-    def test_invalid_falls_back_to_none_with_a_warning(self):
-        for bad in ("0", "-1", "abc"):
-            s = load_settings({"radius_receiver": bad})
-            self.assertIsNone(s.radius_receiver, bad)
-            self.assertTrue(any("radius_receiver" in w for w in s.warnings))
-
-    def test_an_invalid_main_radius_is_treated_as_not_set(self):
-        s = load_settings({"radius": "abc"})
-        self.assertIsNone(s.radius)
-        self.assertTrue(any("'radius'" in w and "not set" in w for w in s.warnings))
-
-    def test_blank_means_not_set(self):
-        s = load_settings({"radius_receiver": ""})
-        self.assertIsNone(s.radius_receiver)
+    def test_all_blank_means_not_set_without_a_warning(self):
+        s = load_settings(zone_keys("zone1", "", "", "", ""))
+        self.assertIsNone(s.zone("receiver1"))
         self.assertEqual(s.warnings, ())
 
+    def test_a_side_can_be_zero_but_the_box_needs_area(self):
+        self.assertIsNotNone(load_settings(zone_keys("zone1", "5", "0", "2", "2")).zone("receiver1"))
+        flat = load_settings(zone_keys("zone1", "5", "0", "0", "0"))
+        self.assertIsNone(flat.zone("receiver1"))
+        self.assertTrue(any("no area" in w for w in flat.warnings))
+
+    def test_invalid_distances_are_treated_as_not_set(self):
+        for bad in ("-1", "abc", "nan", "251"):
+            with self.subTest(bad=bad):
+                s = load_settings(zone_keys("zone1", bad, "3", "3", "3"))
+                self.assertIsNone(s.zone("receiver1"))
+                self.assertTrue(any("'zone1_north'" in w and "not set" in w for w in s.warnings))
+
+    def test_the_unit_applies_to_every_zone(self):
+        s = load_settings({**zone_keys("zone1", "10", "10", "10", "10"), **zone_keys("online_zone", "20", "20", "20", "20"), "radius_unit": "km"})
+        self.assertAlmostEqual(s.zone("receiver1").bounds_nm()[0], to_nm(10, "km"))
+        self.assertAlmostEqual(s.zone("online").bounds_nm()[0], to_nm(20, "km"))
+
+    def test_online_queries_reach_the_online_zones_farthest_corner(self):
+        s = load_settings({**zone_keys("online_zone", "3", "1", "4", "2"), **zone_keys("zone1", "50", "50", "50", "50"), "radius_unit": "nm"})
+        self.assertAlmostEqual(s.online_reach_nm, 5.0)
+
+    def test_an_online_zone_beyond_the_query_cap_warns(self):
+        s = load_settings({**zone_keys("online_zone", "200", "200", "200", "200"), "radius_unit": "nm"})
+        self.assertTrue(any("farther than" in w for w in s.warnings))
+
+
+class LegacyRadiusTests(unittest.TestCase):
+    """Settings saved before zones were boxes keep protecting until the update's migration
+    rewrites them: each radius becomes a square box of the same size."""
+
+    def test_a_radius_becomes_a_square_box(self):
+        s = load_settings({"radius": "13", "radius_receiver": "10", "alt_floor_ft": "100", "alt_ceiling_ft": "3000"})
+        receiver = s.zone("receiver1")
+        online = s.zone("online")
+        self.assertEqual((receiver.north, receiver.south, receiver.east, receiver.west), (10.0,) * 4)
+        self.assertEqual((online.north, online.south, online.east, online.west), (13.0,) * 4)
+        self.assertEqual((receiver.alt_floor_ft, receiver.alt_ceiling_ft), (100.0, 3000.0))
+
+    def test_new_keys_win_over_the_old_radius(self):
+        s = load_settings({"radius_receiver": "10", **zone_keys("zone1", "2", "2", "2", "2")})
+        self.assertEqual(s.zone("receiver1").north, 2.0)
+
+    def test_an_invalid_old_radius_is_treated_as_not_set(self):
+        s = load_settings({"radius": "abc"})
+        self.assertIsNone(s.zone("online"))
+        self.assertTrue(any("'radius'" in w and "not set" in w for w in s.warnings))
 
 class PersonalUseFeedTests(unittest.TestCase):
     def test_it_starts_unconfirmed(self):
@@ -278,7 +340,7 @@ class PersonalUseFeedTests(unittest.TestCase):
     def test_confirming_starts_polling(self):
         rig = Rig(personal_use_confirmed=False)
         rig.run_for(5)
-        rig.manager.update_settings(Settings(source_mode="online", personal_use_confirmed=True, **ZONE))
+        rig.manager.update_settings(zone_settings(source_mode="online", personal_use_confirmed=True, **ZONE))
         rig.manager.poll_once()
         self.assertEqual(len(rig.net.calls), 1)
 
@@ -287,7 +349,7 @@ class PersonalUseFeedTests(unittest.TestCase):
         real = rig.net.fetch
 
         def withdraw(url):
-            rig.manager.update_settings(Settings(source_mode="online", personal_use_confirmed=False, **ZONE))
+            rig.manager.update_settings(zone_settings(source_mode="online", personal_use_confirmed=False, **ZONE))
             return real(url)
 
         rig.manager._fetch = withdraw
@@ -394,15 +456,18 @@ class SecondRadiusDaemonTests(unittest.TestCase):
         self.assertEqual(rig.daemon.feed.state().active_feed, FEED_ONLINE)
         self.assertEqual((rig.daemon.engine.state, rig.daemon.engine.reason), ("BLACKOUT", "aircraft"))
 
-    def test_status_shows_the_radius_in_force(self):
+    def test_status_shows_the_zones_and_which_is_in_use(self):
         rig = DaemonRig(self, self.SETTINGS)
         rig.tick(2)
+        status = rig.status()
+        self.assertEqual(status["unit"], "mi")
         self.assertEqual(
-            rig.status()["radius"], {"value": 10.0, "unit": "mi", "online": 13.0, "receiver": 10.0}
+            [(z["id"], z["north"], z["active"]) for z in status["zones"]],
+            [("receiver1", 10.0, True), ("online", 13.0, False)],
         )
         rig.receiver_down = True
         rig.tick(30)
-        self.assertEqual(rig.status()["radius"]["value"], 13.0)
+        self.assertEqual([z["active"] for z in rig.status()["zones"]], [False, True])
 
     def test_the_status_list_follows_the_map_range(self):
         # 11.5 mi away: beyond a 5 mi map range and the 1 mi receiver radius.
@@ -418,7 +483,7 @@ class SecondRadiusDaemonTests(unittest.TestCase):
         status = rig.status()
         self.assertEqual([a["hex"] for a in status["aircraft"]], [self.BETWEEN["hex"]])
         self.assertEqual(status["map_range"], 25.0)
-        self.assertEqual(status["aircraft_in_radius"], 0)
+        self.assertEqual(status["aircraft_in_area"], 0)
 
     def test_online_queries_cover_the_online_radius_even_if_the_receiver_one_is_small(self):
         rig = DaemonRig(self, {**self.SETTINGS, "radius_receiver": "1", "source_mode": "online"})
@@ -431,7 +496,8 @@ class SecondRadiusDaemonTests(unittest.TestCase):
 
         rig.daemon.feed._fetch = spy
         rig.tick(1)
-        self.assertTrue(calls[0].endswith("/dist/23"), calls[0])  # twice 13 mi, in nm, rounded up
+        # Twice the distance to the 13 mi square's corner, in nm, rounded up.
+        self.assertTrue(calls[0].endswith("/dist/32"), calls[0])
 
 
 class MissingRadiusTests(unittest.TestCase):
@@ -445,14 +511,14 @@ class MissingRadiusTests(unittest.TestCase):
     def test_a_missing_radius_stays_idle_with_a_warning(self):
         rig = self.rig({"source_mode": "receiver", "receiver_url": RX, "personal_use_confirmed": "1"})
         rig.tick(2)
-        self.assertEqual((rig.daemon.engine.state, rig.daemon.engine.reason), ("IDLE", "no_radius"))
+        self.assertEqual((rig.daemon.engine.state, rig.daemon.engine.reason), ("IDLE", "no_zone"))
         self.assertEqual(rig.fpp.ranges, {})
-        self.assertTrue(any("radius" in w for w in rig.status()["warnings"]))
+        self.assertTrue(any("zone" in w for w in rig.status()["warnings"]))
 
     def test_both_mode_needs_both(self):
         rig = self.rig({"source_mode": "both", "receiver_url": RX, "radius": "13", "personal_use_confirmed": "1"})
         rig.tick(2)
-        self.assertEqual(rig.daemon.engine.reason, "no_radius")
+        self.assertEqual(rig.daemon.engine.reason, "no_zone")
 
     def test_entering_it_starts_protection_and_clears_the_warning(self):
         rig = self.rig({"source_mode": "receiver", "receiver_url": RX, "personal_use_confirmed": "1"})
@@ -463,7 +529,7 @@ class MissingRadiusTests(unittest.TestCase):
         os.utime(rig.paths.config_file, ns=(info.st_atime_ns, info.st_mtime_ns + 2_000_000_000))
         rig.tick(2)
         self.assertEqual((rig.daemon.engine.state, rig.daemon.engine.reason), ("BLACKOUT", "aircraft"))
-        self.assertFalse(any("radius" in w for w in rig.status()["warnings"]))
+        self.assertFalse(any("zone" in w for w in rig.status()["warnings"]))
 
     def test_no_online_requests_without_an_online_radius(self):
         rig = self.rig({"source_mode": "online", "personal_use_confirmed": "1"})
@@ -474,7 +540,7 @@ class MissingRadiusTests(unittest.TestCase):
         rig = self.rig({"source_mode": "receiver", "receiver_url": RX, "personal_use_confirmed": "1"})
         rig.tick(2)
         status = rig.status()
-        self.assertEqual(status["radius"], {"value": None, "unit": "mi", "online": None, "receiver": None})
+        self.assertEqual(status["zones"], [])
         self.assertEqual(status["aircraft"], [])
 
     def test_a_test_blackout_still_works(self):

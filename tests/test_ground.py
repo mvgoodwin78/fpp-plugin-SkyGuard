@@ -4,6 +4,7 @@ from skyguard.config import Settings, load_settings
 from skyguard.feeds.base import GROUND, AircraftRecord
 from skyguard.notifier import Notifier, WarningSink
 from skyguard.trigger import NOTE_GROUND_IGNORED, Inputs, TriggerEngine, BLACKOUT, CLEAR, evaluate_zone, is_taxiing
+from tests.zones import box
 
 CENTER = (40.0, -75.0)
 RADIUS_NM = 10.0
@@ -22,9 +23,7 @@ def evaluate(records, ignore=True, limit=LIMIT, count_no_position=True):
         records,
         CENTER[0],
         CENTER[1],
-        RADIUS_NM,
-        0.0,
-        10000.0,
+        (box(RADIUS_NM),),
         count_no_position,
         ignore_ground=ignore,
         ground_speed_limit_kt=limit,
@@ -110,7 +109,7 @@ class DefaultOffTests(unittest.TestCase):
         self.assertFalse(result.aircraft[0].ground_ignored)
 
     def test_existing_callers_keep_counting_ground(self):
-        result = evaluate_zone([plane()], *CENTER, RADIUS_NM, 0.0, 10000.0, True)
+        result = evaluate_zone([plane()], *CENTER, (box(RADIUS_NM),), True)
         self.assertEqual(len(result.in_zone), 1)
 
 

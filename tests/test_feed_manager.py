@@ -16,6 +16,7 @@ from skyguard.feeds.base import FeedError
 from skyguard.feeds.http_client import FeedHttpError
 from skyguard.feeds.online_adsbx_v2 import PROVIDERS, Provider
 from skyguard.notifier import Notifier, WarningSink
+from tests.zones import zone_settings
 
 RX = "http://rx/aircraft.json"
 RX978 = "http://rx978/aircraft.json"
@@ -47,7 +48,7 @@ def settings(**overrides):
         "online_between_shows": True,
     }
     values.update(overrides)
-    return Settings(**values)
+    return zone_settings(**values)
 
 
 class RecordingSink:
@@ -239,10 +240,11 @@ class OnlinePollingTests(unittest.TestCase):
             h.run_for(20)
         self.assertEqual(h.net.count(ONLINE), 4)
 
-    def test_the_query_uses_the_center_and_twice_the_radius(self):
+    def test_the_query_uses_the_center_and_twice_the_online_zones_reach(self):
+        # A 10 nm square reaches 14.14 nm at its corners.
         h = Harness(source_mode="online", radius=10.0, radius_unit="nm", map_range=5.0)
         h.run_for(1)
-        self.assertEqual(h.net.calls[0], "https://api.adsb.lol/v2/point/40.0000/-75.0000/20")
+        self.assertEqual(h.net.calls[0], "https://api.adsb.lol/v2/point/40.0000/-75.0000/29")
 
     def test_the_query_covers_the_map_range_when_it_is_larger(self):
         h = Harness(source_mode="online", radius=2.0, radius_unit="nm", map_range=25.0)

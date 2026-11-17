@@ -19,6 +19,7 @@ from skyguard.overlay import (
 from skyguard.status import _aircraft_entry
 from skyguard.trigger import EvaluatedAircraft, evaluate_zone
 from tests.test_overlay import Rig, fixture, universe, universes
+from tests.zones import box
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CENTER = (40.0, -75.0)
@@ -35,7 +36,7 @@ def plane(alt, position=NEAR):
 
 
 def in_zone(alt, floor=0.0, ceiling=1000.0, elevation=0.0):
-    result = evaluate_zone([plane(alt)], CENTER[0], CENTER[1], 5.0, floor, ceiling, True, elevation_ft=elevation)
+    result = evaluate_zone([plane(alt)], CENTER[0], CENTER[1], (box(5.0, floor, ceiling),), True, elevation_ft=elevation)
     return bool(result.in_zone)
 
 

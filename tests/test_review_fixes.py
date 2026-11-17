@@ -17,6 +17,7 @@ from skyguard.overlay import Ledger
 from skyguard.trigger import data_is_fresh, evaluate_zone
 from tests.test_daemon import A_DIMMER, A_SHUTTER, B_DIMMER, PLAYING, Rig, plane
 from tests.test_feed_manager import ONLINE, RX, Harness, setUpModule  # noqa: F401 (fast test provider)
+from tests.zones import box
 
 try:
     import fcntl
@@ -179,15 +180,15 @@ class NegativeAltitudeTests(unittest.TestCase):
         return AircraftRecord("a1", None, 40.0, -75.0, alt, 140.0, None, 0.5, "receiver")
 
     def test_an_aircraft_reporting_below_zero_counts_with_the_default_floor(self):
-        zone = evaluate_zone([self.record(-130.0)], 40.0, -75.0, 5.0, 0.0, 10000.0, True)
+        zone = evaluate_zone([self.record(-130.0)], 40.0, -75.0, (box(5.0, 0.0, 10000.0),), True)
         self.assertEqual(len(zone.in_zone), 1)
 
     def test_a_negative_floor_is_no_floor_either(self):
-        zone = evaluate_zone([self.record(-900.0)], 40.0, -75.0, 5.0, -100.0, 10000.0, True)
+        zone = evaluate_zone([self.record(-900.0)], 40.0, -75.0, (box(5.0, -100.0, 10000.0),), True)
         self.assertEqual(len(zone.in_zone), 1)
 
     def test_a_real_floor_still_applies(self):
-        zone = evaluate_zone([self.record(-130.0)], 40.0, -75.0, 5.0, 500.0, 10000.0, True)
+        zone = evaluate_zone([self.record(-130.0)], 40.0, -75.0, (box(5.0, 500.0, 10000.0),), True)
         self.assertEqual(zone.in_zone, ())
 
 

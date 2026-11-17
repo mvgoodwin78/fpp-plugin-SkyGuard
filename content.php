@@ -31,6 +31,31 @@ function skyGuardNumber($setting, $min, $max, $default = '', $unit = '') {
     }
 }
 
+// One side of a zone: how far it reaches from the center point. No default, so the user enters it.
+function skyGuardZoneDistance($setting, $label) {
+    echo "<div class='col-6 col-lg-3'><label class='form-label small mb-1' for='" . htmlspecialchars($setting, ENT_QUOTES) . "'>" . htmlspecialchars($label) . "</label>";
+    skyGuardNumber($setting, 0, 250);
+    echo "</div>";
+}
+
+// A zone: a box reaching north, south, east and west of the center point, with its own altitude band.
+function skyGuardZone($prefix, $title, $help) {
+    echo "<div class='card mb-3 skyguard-zone-card skyguard-zone-card-" . htmlspecialchars($prefix, ENT_QUOTES) . "'><div class='card-body'>";
+    echo "<h6 class='card-title mb-1'>" . htmlspecialchars($title) . "</h6>";
+    echo "<div class='form-text mt-0 mb-2'>" . htmlspecialchars($help) . "</div>";
+    echo "<div class='row g-2 mb-2'>";
+    skyGuardZoneDistance($prefix . '_north', 'North');
+    skyGuardZoneDistance($prefix . '_south', 'South');
+    skyGuardZoneDistance($prefix . '_east', 'East');
+    skyGuardZoneDistance($prefix . '_west', 'West');
+    echo "</div><div class='row g-2'>";
+    echo "<div class='col-12 col-sm-6'><label class='form-label small mb-1'>Lowest altitude, above your show</label>";
+    skyGuardNumber($prefix . '_alt_floor_ft', -2000, 100000, '0', 'feet');
+    echo "</div><div class='col-12 col-sm-6'><label class='form-label small mb-1'>Highest altitude, above your show</label>";
+    skyGuardNumber($prefix . '_alt_ceiling_ft', -2000, 100000, '10000', 'feet');
+    echo "</div></div></div></div>";
+}
+
 function skyGuardSelect($title, $setting, $default, $values) {
     global $skyGuardRepo;
     PrintSettingSelect($title, $setting, 0, 0, $default, $values, $skyGuardRepo, 'skyGuardSettingSaved');
@@ -135,7 +160,7 @@ function skyGuardCheckbox($title, $setting, $default) {
                 <?php skyGuardRowClose(); ?>
 
                 <p class="text-body-secondary small">
-                    With online data, your show's location and search radius go to the provider chosen above.
+                    With online data, your show's location and a search distance that covers your online zone go to the provider chosen above.
                     With your receiver and online data together, that happens during a show even while your receiver is working, to catch aircraft it misses.
                     If the provider has a problem during a show, the heads stay dark until data returns.
                 </p>
@@ -164,7 +189,7 @@ function skyGuardCheckbox($title, $setting, $default) {
             <?php skyGuardRowClose(); ?>
 
             <div id="skyGuardLagNotice" class="alert alert-info" role="status" data-show-with="online">
-                Online flight data can lag behind real aircraft. Increase your radius by 3 miles to allow for it.
+                Online flight data can lag behind real aircraft. Make your online zone 3 miles larger on every side to allow for it.
             </div>
 
             <div class="mb-3">
@@ -173,37 +198,41 @@ function skyGuardCheckbox($title, $setting, $default) {
                 <div class="form-text" id="skyGuardLocationMapNote"></div>
             </div>
 
-            <div data-show-with="online">
-                <?php skyGuardRowOpen('Online radius', '', 'Required. Used while online data is the active feed, and during a show for aircraft your receiver misses.'); ?>
-                <?php skyGuardNumber('radius', 0.01, 99999); ?>
-                <?php skyGuardRowClose(); ?>
-            </div>
-            <div data-show-with="receiver">
-                <?php skyGuardRowOpen('Receiver radius', '', 'Required. Used while your own receiver is the active feed.'); ?>
-                <?php skyGuardNumber('radius_receiver', 0.01, 99999); ?>
-                <?php skyGuardRowClose(); ?>
-            </div>
-            <?php skyGuardRowOpen('Radius unit'); ?>
-            <?php skyGuardSelect('Radius unit', 'radius_unit', 'mi', array('Miles' => 'mi', 'Nautical miles' => 'nm', 'Kilometers' => 'km')); ?>
+            <p class="small text-body-secondary mb-2">
+                Each zone is a box around your center point. Enter how far it reaches north, south, east and west of the center, so it can be longer on one side, for example along a flight path.
+                An aircraft inside a zone and within that zone's altitudes blacks out the heads during a show. Every aircraft that passes through a zone is logged on the status page.
+            </p>
+
+            <?php skyGuardRowOpen('Distance unit', '', 'For the zones and the map range.'); ?>
+            <?php skyGuardSelect('Distance unit', 'radius_unit', 'mi', array('Miles' => 'mi', 'Nautical miles' => 'nm', 'Kilometers' => 'km')); ?>
             <?php skyGuardRowClose(); ?>
 
-            <?php skyGuardRowOpen('Map range', '', 'How far out the map and aircraft list show aircraft, in the radius unit, 1 to 250. Only for seeing what is coming: blackouts use the radius.'); ?>
+            <div data-show-with="receiver">
+                <?php skyGuardZone('zone1', 'Receiver zone 1', 'Required. Judges what your receiver sees. Receivers have little or no lag, so this can be tight around the show.'); ?>
+
+                <?php skyGuardRowOpen('Use a second receiver zone', '', 'Optional. A second box with its own altitudes, for example a long approach path at low altitude. An aircraft in either zone blacks out the heads.'); ?>
+                <?php skyGuardCheckbox('Use a second receiver zone', 'zone2_enabled', 0); ?>
+                <?php skyGuardRowClose(); ?>
+                <div data-show-with="zone2">
+                    <?php skyGuardZone('zone2', 'Receiver zone 2', 'Used only while "Use a second receiver zone" is on. Enter all four distances.'); ?>
+                </div>
+            </div>
+
+            <div data-show-with="online">
+                <?php skyGuardZone('online_zone', 'Online zone', 'Required. Judges online data: while it is the active feed, and during a show for aircraft your receiver misses. Make it larger than the receiver zone, because online data lags.'); ?>
+            </div>
+
+            <?php skyGuardRowOpen('Map range', '', 'How far out the map and aircraft list show aircraft, in the distance unit, 1 to 250. Only for seeing what is coming: blackouts use the zones.'); ?>
             <?php skyGuardNumber('map_range', 1, 250, '25'); ?>
             <?php skyGuardRowClose(); ?>
 
-            <?php skyGuardRowOpen('Show elevation', '', 'The height of your show above sea level. Aircraft report height above sea level, so SkyGuard subtracts this and the altitudes below become heights above your show. Leave at 0 to measure from sea level.'); ?>
+            <?php skyGuardRowOpen('Show elevation', '', 'The height of your show above sea level. Aircraft report height above sea level, so SkyGuard subtracts this and the zone altitudes become heights above your show. Leave at 0 to measure from sea level.'); ?>
             <?php skyGuardNumber('show_elevation_ft', -1500, 15000, '0', 'feet'); ?>
             <button type="button" class="btn btn-sm btn-secondary mt-1" id="skyGuardElevationLookup">Look it up</button>
             <span class="small ms-2" id="skyGuardElevationNote"></span>
             <div class="form-text">Look it up sends your saved center point to Open-Meteo once. Save the center point first.</div>
             <?php skyGuardRowClose(); ?>
 
-            <?php skyGuardRowOpen('Lowest altitude', '', 'Height above your show. 0 includes aircraft on the ground.'); ?>
-            <?php skyGuardNumber('alt_floor_ft', -2000, 100000, '0', 'feet'); ?>
-            <?php skyGuardRowClose(); ?>
-            <?php skyGuardRowOpen('Highest altitude', '', 'Height above your show.'); ?>
-            <?php skyGuardNumber('alt_ceiling_ft', -2000, 100000, '10000', 'feet'); ?>
-            <?php skyGuardRowClose(); ?>
             <?php skyGuardRowOpen('Ignore aircraft on the ground', '', 'Skips aircraft reporting they are on the ground until they reach the speed limit under Advanced.'); ?>
             <?php skyGuardCheckbox('Ignore aircraft on the ground', 'ignore_ground', 0); ?>
             <?php skyGuardRowClose(); ?>

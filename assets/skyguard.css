@@ -36,6 +36,11 @@
     fill: var(--bs-info);
 }
 
+.skyguard-zone-receiver2 {
+    stroke: var(--bs-warning);
+    fill: var(--bs-warning);
+}
+
 .skyguard-legend-item {
     display: inline-flex;
     align-items: center;
@@ -55,6 +60,28 @@
 
 .skyguard-swatch-receiver {
     border-top-color: var(--bs-info);
+}
+
+.skyguard-swatch-receiver2 {
+    border-top-color: var(--bs-warning);
+}
+
+/* The zone cards on the Location & Zone tab, marked in the color the map draws them in. */
+.skyguard-zone-card {
+    border-left: 4px solid var(--bs-info);
+}
+
+.skyguard-zone-card-zone2 {
+    border-left-color: var(--bs-warning);
+}
+
+.skyguard-zone-card-online_zone {
+    border-left-color: var(--bs-danger);
+}
+
+.skyguard-visit-table {
+    max-height: 24rem;
+    overflow-y: auto;
 }
 
 .skyguard-swatch-standby {
@@ -100,6 +127,7 @@
     --sg-ignored: var(--bs-gray-500);
     --sg-missed: var(--bs-yellow);
     --sg-receiver: var(--bs-cyan);
+    --sg-receiver2: var(--bs-orange);
     --sg-online: var(--bs-pink);
 }
 
@@ -154,6 +182,11 @@
 .skyguard-scope .skyguard-zone-receiver {
     stroke: var(--sg-receiver);
     fill: var(--sg-receiver);
+}
+
+.skyguard-scope .skyguard-zone-receiver2 {
+    stroke: var(--sg-receiver2);
+    fill: var(--sg-receiver2);
 }
 
 .skyguard-scope .skyguard-zone-online {
@@ -322,6 +355,10 @@
 
 .skyguard-scope-legend .skyguard-swatch-receiver {
     border-top-color: var(--sg-receiver);
+}
+
+.skyguard-scope-legend .skyguard-swatch-receiver2 {
+    border-top-color: var(--sg-receiver2);
 }
 
 .skyguard-scope-legend .skyguard-swatch-online {

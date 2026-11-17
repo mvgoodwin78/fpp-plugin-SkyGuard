@@ -3,7 +3,7 @@
 		"/api/plugin/fpp-plugin-SkyGuard/status": {
 			"get": {
 				"summary": "SkyGuard's current state, feed health, aircraft, fixtures and warnings",
-				"description": "Read-only. Includes the show's location, because the map needs it. `running` is false when the daemon hasn't updated its status recently. `held_channels` lists the channels being forced now, and `events` the last 20 blackout starts and ends.",
+				"description": "Read-only. Includes the show's location, because the map needs it. `running` is false when the daemon hasn't updated its status recently. `zones` lists each zone in use: its north, south, east and west reach in `unit`, its altitude band, whether it judges the active feed now, and how many aircraft count in it. `visits_open` lists the zone visits in progress. `held_channels` lists the channels being forced now, and `events` the last 20 blackout starts and ends.",
 				"responses": {
 					"200": {
 						"description": "Status"
@@ -17,6 +17,27 @@
 				"responses": {
 					"200": {
 						"description": "Indicator"
+					}
+				}
+			}
+		},
+		"/api/plugin/fpp-plugin-SkyGuard/visits": {
+			"get": {
+				"summary": "The zone log: aircraft that passed through each zone, newest first",
+				"description": "Read-only. Each visit has `zone`, `hex`, `callsign`, `source`, `entered` and `left` (seconds since the epoch), `seconds` inside, and the altitude on entry, lowest and highest in feet (or \"ground\"). Kept for 90 days. `limit` is 1 to 1000, default 100; `limit=all` returns every visit, for the CSV download.",
+				"parameters": [
+					{
+						"name": "limit",
+						"in": "query",
+						"required": false,
+						"schema": {
+							"type": "string"
+						}
+					}
+				],
+				"responses": {
+					"200": {
+						"description": "Visits"
 					}
 				}
 			}

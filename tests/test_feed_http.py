@@ -17,6 +17,7 @@ from skyguard.feeds.online_adsbx_v2 import PROVIDERS, Provider
 from skyguard.feeds.receiver import parse_receiver
 from skyguard.notifier import Notifier, WarningSink
 from tests.mock_feed_server import MockFeedServer
+from tests.zones import zone_settings
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 RECEIVER_PATH = "/data/aircraft.json"
@@ -232,7 +233,7 @@ class LiveManagerTests(ServerTestCase):
         values.update(overrides)
         self.warnings = WarningSink()
         manager = FeedManager(
-            Settings(**values),
+            zone_settings(**values),
             Notifier([self.warnings]),
             fetch=lambda url: fetch_json(url, timeout_s=0.2),
         )
@@ -322,7 +323,7 @@ class LiveManagerTests(ServerTestCase):
             return fetch_json(url, timeout_s=0.2)
 
         manager = FeedManager(
-            Settings(
+            zone_settings(
                 source_mode="receiver",
                 receiver_url=self.server.url(RECEIVER_PATH),
                 poll_interval_s=0.02,
